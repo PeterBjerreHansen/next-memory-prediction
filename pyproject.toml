@@ -1,0 +1,35 @@
+[project]
+name = "next-memory-prediction"
+version = "0.1.0"
+description = "TinyStories experiments for temporal next-memory prediction in multi-pass transformers"
+readme = "readme.md"
+requires-python = ">=3.10"
+dependencies = [
+  "datasets>=2.18",
+  "matplotlib>=3.7",
+  "pyyaml>=6.0",
+  "tokenizers>=0.15",
+  "torch>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+nmp-train = "nmp.cli.train:main"
+nmp-evaluate = "nmp.cli.evaluate:main"
+nmp-probe = "nmp.cli.probe:main"
+nmp-plot = "nmp.cli.plot:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["nmp*"]
+exclude = ["tests*", "documents*", "legacy*", "archive*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-p", "no:cacheprovider"]

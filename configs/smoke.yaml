@@ -1,0 +1,35 @@
+name: smoke
+seed: 0
+model:
+  variant: transformer_ntp
+  block_size: 64
+  n_layer: 2
+  n_head: 2
+  n_embd: 64
+  n_pass: 2
+  memory_tape_gate: scalar
+data:
+  source: huggingface
+objective:
+  lambda_memory: 1.0
+  memory_horizon: 1
+  dynamics_projection_factor: 1.3
+training:
+  train_steps: 10
+  micro_batch_size: 2
+  gradient_accumulation_steps: 1
+  eval_interval: 5
+  eval_batches: 2
+  log_interval: 1
+  checkpoint_interval: 5
+  device: auto
+  precision: float32
+  compile: false
+evaluation:
+  generation_prompts: 2
+  prompt_tokens: 16
+  generation_tokens: 8
+  diagnostic_batches: 2
+  probe_steps: 10
+  probe_batch_size: 2
+  probe_offsets: [1, 2, 4, 8, 16, 20]

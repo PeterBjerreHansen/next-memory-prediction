@@ -1,0 +1,34 @@
+name: development
+seed: 0
+model:
+  variant: transformer_ntp
+  block_size: 256
+  n_layer: 4
+  n_head: 4
+  n_embd: 256
+  n_pass: 4
+  memory_tape_gate: scalar
+data:
+  source: huggingface
+objective:
+  lambda_memory: 1.0
+  memory_horizon: 1
+  dynamics_projection_factor: 1.3
+training:
+  train_steps: 10000
+  micro_batch_size: 16
+  gradient_accumulation_steps: 4
+  eval_interval: 500
+  eval_batches: 20
+  log_interval: 20
+  checkpoint_interval: 500
+  device: auto
+  precision: float32
+  compile: false
+evaluation:
+  generation_prompts: 8
+  prompt_tokens: 32
+  generation_tokens: 64
+  diagnostic_batches: 8
+  probe_steps: 1000
+  probe_batch_size: 64

@@ -1,0 +1,34 @@
+name: reference
+seed: 0
+model:
+  variant: transformer_ntp
+  block_size: 256
+  n_layer: 8
+  n_head: 8
+  n_embd: 768
+  n_pass: 4
+  memory_tape_gate: scalar
+data:
+  source: huggingface
+objective:
+  lambda_memory: 1.0
+  memory_horizon: 1
+  dynamics_projection_factor: 1.3
+training:
+  train_steps: 100000
+  micro_batch_size: 32
+  gradient_accumulation_steps: 8
+  eval_interval: 1000
+  eval_batches: 100
+  log_interval: 10
+  checkpoint_interval: 1000
+  device: auto
+  precision: bfloat16
+  compile: true
+evaluation:
+  generation_prompts: 16
+  prompt_tokens: 32
+  generation_tokens: 128
+  diagnostic_batches: 20
+  probe_steps: 20000
+  probe_batch_size: 256
