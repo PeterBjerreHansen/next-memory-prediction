@@ -45,6 +45,10 @@ The study compares three models:
 Chunked MPTT and a direct NextLat baseline are deferred. The active package
 contains no chunk IDs, chunk tokens, or chunked-attention paths.
 
+MemoryTape generation supports exact `recompute` inference and recurrent
+`final_pass` inference. The recurrent path always warms up on the prompt and
+reuses the final pass's memory tape; there is no selectable pass-source flag.
+
 For final-pass memory tape \(M=[m_1,\ldots,m_T]\), a residual dynamics MLP
 predicts the next memory from the current memory and next-token embedding:
 
@@ -108,7 +112,9 @@ python -m nmp.cli.train \
 ```
 
 The default data source is the pinned Hugging Face TinyStories revision. For
-offline work, supply line-delimited local files:
+each story, sequences that fit are terminated with EOS and padded; stories
+that exceed the context window are truncated without an artificial EOS token.
+For offline work, supply line-delimited local files:
 
 ```bash
 python -m nmp.cli.train \
@@ -131,7 +137,8 @@ python -m nmp.cli.plot --run-dir runs/local/nmp
 Each run records its resolved configuration, provenance, JSONL metrics,
 checkpoints, generated samples, evaluation results, probe results, and plots.
 Best checkpoints are selected by final-pass validation NLL, not combined
-training loss.
+training loss. Validation NLLs are averaged over valid target tokens rather
+than over batches.
 
 ## Protocol
 

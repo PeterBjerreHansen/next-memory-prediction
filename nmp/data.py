@@ -114,8 +114,11 @@ def encode_texts(
     )
     lengths = torch.zeros(len(texts), dtype=torch.long)
     for row, text in enumerate(texts):
-        ids = tokenizer.encode(text)[: block_size - 1]
-        ids.append(tokenizer.eos_id)
+        encoded = tokenizer.encode(text)
+        if len(encoded) <= block_size - 1:
+            ids = [*encoded, tokenizer.eos_id]
+        else:
+            ids = encoded[:block_size]
         length = len(ids)
         tokens[row, :length] = torch.tensor(ids, dtype=torch.long)
         lengths[row] = length

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import types
 
 import pytest
@@ -8,6 +9,7 @@ import torch
 from nmp.models import (
     CausalTransformer,
     MemoryTapeConfig,
+    MemoryTapeOutput,
     MemoryTapeTransformer,
     TransformerConfig,
 )
@@ -182,3 +184,51 @@ def test_first_generated_token_matches_between_inference_modes():
     )
     assert torch.equal(exact, approximate)
 
+
+def test_final_pass_generation_has_no_memory_source_flag():
+    parameters = inspect.signature(MemoryTapeTransformer.generate).parameters
+    assert "cache_source" not in parameters
+
+
+def test_final_pass_generation_reuses_last_pass_memory():
+    model = MemoryTapeTransformer(
+        MemoryTapeConfig(
+            block_size=8,
+            vocab_size=11,
+            n_layer=1,
+            n_head=1,
+            n_embd=4,
+            n_pass=2,
+        )
+    ).eval()
+    seen_memory = []
+
+    def fake_forward(self, ids):
+        shape = (ids.size(0), ids.size(1), self.config.n_embd)
+        logits = torch.zeros((*ids.shape, self.config.vocab_size))
+        logits[..., 2] = 1.0
+        hidden = torch.zeros(shape)
+        return MemoryTapeOutput(
+            logits_per_pass=(logits, logits),
+            hidden_states_per_pass=(hidden, hidden),
+            memory_states_per_pass=(
+                torch.full(shape, 3.0),
+                torch.full(shape, 7.0),
+            ),
+        )
+
+    def recording_pass(self, token_stream, memory_tape):
+        seen_memory.append(memory_tape.detach().clone())
+        return token_stream
+
+    model.forward = types.MethodType(fake_forward, model)
+    model._run_full_pass = types.MethodType(recording_pass, model)
+    model.generate(
+        torch.tensor([[4, 5]]),
+        2,
+        do_sample=False,
+        inference_mode="final_pass",
+    )
+
+    assert len(seen_memory) == 1
+    assert torch.all(seen_memory[0][:, 1:] == 7.0)

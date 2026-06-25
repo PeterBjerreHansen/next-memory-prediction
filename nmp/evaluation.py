@@ -42,7 +42,8 @@ def evaluate_batches(
         predictor.eval()
     totals: dict[str, float] = defaultdict(float)
     pass_totals: list[float] | None = None
-    count = 0
+    ntp_token_count = 0
+    memory_transition_count = 0
     for cpu_batch in batches:
         tokens = cpu_batch.tokens.to(device)
         with autocast_context(device, config.training.precision):
@@ -58,28 +59,58 @@ def evaluate_batches(
                 lambda_memory=config.objective.lambda_memory,
             )
         metrics = losses.detached_metrics()
-        totals["loss"] += float(metrics["loss"])
-        totals["weighted_ntp_loss"] += float(metrics["weighted_ntp_loss"])
-        totals["final_pass_nll"] += float(metrics["final_pass_nll"])
+        batch_ntp_tokens = int(
+            (tokens[:, 1:] != tokenizer.pad_id).sum().item()
+        )
+        totals["weighted_ntp_loss"] += (
+            float(metrics["weighted_ntp_loss"]) * batch_ntp_tokens
+        )
+        totals["final_pass_nll"] += (
+            float(metrics["final_pass_nll"]) * batch_ntp_tokens
+        )
+        ntp_token_count += batch_ntp_tokens
         if metrics["memory_prediction_loss"] is not None:
+            next_tokens = tokens[:, 1:]
+            batch_memory_transitions = int(
+                (
+                    (next_tokens != tokenizer.eos_id)
+                    & (next_tokens != tokenizer.pad_id)
+                )
+                .sum()
+                .item()
+            )
             totals["memory_prediction_loss"] += float(
                 metrics["memory_prediction_loss"]
-            )
+            ) * batch_memory_transitions
+            memory_transition_count += batch_memory_transitions
         current_passes = list(map(float, metrics["pass_nlls"]))
         if pass_totals is None:
             pass_totals = [0.0] * len(current_passes)
         for index, value in enumerate(current_passes):
-            pass_totals[index] += value
-        count += 1
+            pass_totals[index] += value * batch_ntp_tokens
+    if ntp_token_count == 0:
+        raise ValueError("validation batches contain no next-token targets")
+    weighted_ntp = totals["weighted_ntp_loss"] / ntp_token_count
+    final_pass_nll = totals["final_pass_nll"] / ntp_token_count
     result: dict[str, Any] = {
-        "loss": totals["loss"] / count,
-        "weighted_ntp_loss": totals["weighted_ntp_loss"] / count,
-        "final_pass_nll": totals["final_pass_nll"] / count,
-        "pass_nlls": [value / count for value in pass_totals or []],
+        "loss": weighted_ntp,
+        "weighted_ntp_loss": weighted_ntp,
+        "final_pass_nll": final_pass_nll,
+        "pass_nlls": [
+            value / ntp_token_count for value in pass_totals or []
+        ],
+        "ntp_tokens": ntp_token_count,
     }
     result["perplexity"] = safe_perplexity(result["final_pass_nll"])
-    if "memory_prediction_loss" in totals:
-        result["memory_prediction_loss"] = totals["memory_prediction_loss"] / count
+    if predictor is not None:
+        memory_prediction_loss = (
+            totals["memory_prediction_loss"] / memory_transition_count
+            if memory_transition_count
+            else 0.0
+        )
+        result["memory_prediction_loss"] = memory_prediction_loss
+        result["memory_transitions"] = memory_transition_count
+        result["loss"] += config.objective.lambda_memory * memory_prediction_loss
     return result
 
 
@@ -183,7 +214,6 @@ def generation_diagnostics(
                 config.evaluation.generation_tokens,
                 do_sample=False,
                 inference_mode="final_pass",
-                cache_source="penultimate",
             )
             modes["final_pass"] = final_pass
             recompute_suffix = recompute[0, len(prompt_ids) :]

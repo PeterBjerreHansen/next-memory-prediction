@@ -216,10 +216,8 @@ class CausalTransformer(nn.Module):
         temperature: float = 1.0,
         do_sample: bool = True,
         inference_mode: str = "recompute",
-        cache_source: str = "penultimate",
         eos_token_id: int | None = None,
     ) -> torch.Tensor:
-        del cache_source
         if inference_mode != "recompute":
             raise ValueError("CausalTransformer only supports recompute inference")
         for _ in range(max_new_tokens):
@@ -469,7 +467,6 @@ class MemoryTapeTransformer(nn.Module):
         temperature: float = 1.0,
         do_sample: bool = True,
         inference_mode: str = "recompute",
-        cache_source: str = "penultimate",
         eos_token_id: int | None = None,
     ) -> torch.Tensor:
         if inference_mode == "recompute":
@@ -492,7 +489,6 @@ class MemoryTapeTransformer(nn.Module):
             max_new_tokens,
             temperature=temperature,
             do_sample=do_sample,
-            cache_source=cache_source,
             eos_token_id=eos_token_id,
         )
 
@@ -503,24 +499,17 @@ class MemoryTapeTransformer(nn.Module):
         *,
         temperature: float,
         do_sample: bool,
-        cache_source: str,
         eos_token_id: int | None,
     ) -> torch.Tensor:
         if max_new_tokens <= 0:
             return ids
-        if cache_source == "penultimate":
-            cache_index = self.config.n_pass - 2
-        elif cache_source == "last":
-            cache_index = self.config.n_pass - 1
-        else:
-            raise ValueError("cache_source must be penultimate or last")
 
         ids_window = ids[:, -self.config.block_size :]
         output = self(ids_window)
         logits = output.logits
-        memory_history = output.memory_states_per_pass[cache_index]
+        memory_history = output.memory_states
 
-        for _ in range(max_new_tokens):
+        for generated_index in range(max_new_tokens):
             next_logits = logits[:, -1, :] / temperature
             next_ids = (
                 torch.multinomial(F.softmax(next_logits, dim=-1), 1)
@@ -529,6 +518,8 @@ class MemoryTapeTransformer(nn.Module):
             )
             ids = torch.cat((ids, next_ids), dim=1)
             if eos_token_id is not None and bool((next_ids == eos_token_id).all()):
+                break
+            if generated_index + 1 == max_new_tokens:
                 break
 
             ids_window = ids[:, -self.config.block_size :]

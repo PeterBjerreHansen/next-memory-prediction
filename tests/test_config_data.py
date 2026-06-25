@@ -19,16 +19,23 @@ def test_tokenizer_is_pinned_1000_token_asset():
     assert tokenizer.encode("Once upon a time.")
 
 
-def test_one_story_per_row_truncates_appends_eos_and_pads():
+def test_one_story_per_row_only_appends_eos_at_true_end():
     tokenizer = TinyStoriesTokenizer()
+    short_text = "Once upon a time."
+    long_text = "A " * 100
     batch = encode_texts(
-        ["Once upon a time.", "A " * 100],
+        [short_text, long_text],
         tokenizer=tokenizer,
         block_size=8,
     )
     assert batch.tokens.shape == (2, 8)
     assert batch.tokens[0, batch.lengths[0] - 1] == tokenizer.eos_id
-    assert batch.tokens[1, -1] == tokenizer.eos_id
+    assert batch.lengths[1] == 8
+    assert torch.equal(
+        batch.tokens[1],
+        torch.tensor(tokenizer.encode(long_text)[:8]),
+    )
+    assert tokenizer.eos_id not in batch.tokens[1]
     assert torch.all(
         batch.tokens[0, batch.lengths[0] :] == tokenizer.pad_id
     )
