@@ -10,7 +10,6 @@ from .artifacts import append_jsonl, artifacts_for, write_json
 from .checkpoint import load_checkpoint, restore_checkpoint
 from .config import (
     ExperimentConfig,
-    load_config,
     transition_target_for_variant,
 )
 from .data import (
@@ -274,20 +273,21 @@ def load_run(
     device_override: str | None = None,
 ):
     artifacts = artifacts_for(run_dir)
-    config = load_config(artifacts.config_path)
+    checkpoint_path = artifacts.run_dir / checkpoint_name
+    if not checkpoint_path.exists():
+        checkpoint_path = artifacts.latest_checkpoint
+    checkpoint = load_checkpoint(checkpoint_path, map_location="cpu")
+    config = ExperimentConfig.from_dict(checkpoint["config"])
     if device_override is not None:
         config.training.device = device_override
     device = resolve_device(config.training.device)
     tokenizer = TinyStoriesTokenizer()
     model, predictor = build_model(config, vocab_size=tokenizer.vocab_size)
-    checkpoint_path = artifacts.run_dir / checkpoint_name
-    if not checkpoint_path.exists():
-        checkpoint_path = artifacts.latest_checkpoint
-    checkpoint = load_checkpoint(checkpoint_path, map_location=device)
     restore_checkpoint(
         checkpoint,
         model=model,
         predictor=predictor,
+        restore_rng=False,
     )
     model.to(device).eval()
     if predictor is not None:
@@ -315,25 +315,40 @@ def evaluate_run(
         device_override=device_override,
     )
     _, val_corpus = load_corpora(config.data)
-    batches = sequential_batches(
+    loss_batches = sequential_batches(
+        val_corpus,
+        tokenizer,
+        batch_size=config.training.micro_batch_size,
+        block_size=config.model.block_size,
+        num_batches=config.training.eval_batches,
+    )
+    loss_metrics = evaluate_batches(
+        config=config,
+        model=model,
+        predictor=predictor,
+        batches=loss_batches,
+        tokenizer=tokenizer,
+        device=device,
+    )
+    diagnostic_batches = sequential_batches(
         val_corpus,
         tokenizer,
         batch_size=config.training.micro_batch_size,
         block_size=config.model.block_size,
         num_batches=config.evaluation.diagnostic_batches,
     )
-    loss_metrics = evaluate_batches(
+    diagnostic_loss_metrics = evaluate_batches(
         config=config,
         model=model,
         predictor=predictor,
-        batches=batches,
+        batches=diagnostic_batches,
         tokenizer=tokenizer,
         device=device,
     )
     representations = representation_diagnostics(
         config=config,
         model=model,
-        batches=batches,
+        batches=diagnostic_batches,
         tokenizer=tokenizer,
         device=device,
     )
@@ -353,7 +368,16 @@ def evaluate_run(
         ),
         "lambda_transition": config.objective.lambda_transition,
         "parameters": count_parameters(model, predictor),
+        "protocol": {
+            "config_source": "checkpoint",
+            "loss_source": "training.eval_batches",
+            "loss_batches": config.training.eval_batches,
+            "diagnostic_source": "evaluation.diagnostic_batches",
+            "diagnostic_batches": config.evaluation.diagnostic_batches,
+            "checkpoint_selection_metric": "final_pass_nll",
+        },
         "loss": loss_metrics,
+        "diagnostic_loss": diagnostic_loss_metrics,
         "representations": representations,
         "generation": generation,
     }

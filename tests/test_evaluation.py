@@ -6,8 +6,11 @@ import pytest
 import torch
 import torch.nn as nn
 
+from conftest import make_config
+from nmp.artifacts import artifacts_for
 from nmp.data import TextBatch
 from nmp.evaluation import evaluate_batches
+from nmp.evaluation import evaluate_run
 from nmp.models import (
     LatentTransitionPredictor,
     MemoryTapeConfig,
@@ -15,6 +18,7 @@ from nmp.models import (
     TransformerOutput,
 )
 from nmp.objectives import compute_loss, next_token_loss
+from nmp.training import train_experiment
 
 
 class UnequalBatchLossModel(nn.Module):
@@ -129,3 +133,32 @@ def test_validation_transition_loss_is_weighted_by_valid_transitions():
 
     assert metrics["transition_count"] == 4
     assert metrics["transition_prediction_loss"] == pytest.approx(expected)
+
+
+def test_evaluate_run_uses_training_eval_batches_for_reported_loss(
+    local_story_files,
+    tmp_path,
+):
+    train_file, val_file = local_story_files
+    config = make_config(
+        "transformer_ntp",
+        train_file,
+        val_file,
+        train_steps=1,
+    )
+    config.training.eval_batches = 2
+    config.evaluation.diagnostic_batches = 1
+    run_dir = tmp_path / "run"
+    train_experiment(config, run_dir=run_dir)
+
+    result = evaluate_run(run_dir, device_override="cpu")
+    protocol = result["protocol"]
+    loss = result["loss"]
+    diagnostic_loss = result["diagnostic_loss"]
+
+    assert protocol["config_source"] == "checkpoint"
+    assert protocol["loss_source"] == "training.eval_batches"
+    assert protocol["loss_batches"] == 2
+    assert protocol["diagnostic_batches"] == 1
+    assert loss["ntp_tokens"] > diagnostic_loss["ntp_tokens"]
+    assert artifacts_for(run_dir).evaluation_path.exists()

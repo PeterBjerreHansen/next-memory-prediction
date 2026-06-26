@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import torch
+import pytest
 
 from nmp.cli.train import parse_args, resolve_config
 from nmp.config import ExperimentConfig, load_config
@@ -116,8 +117,6 @@ def test_legacy_nextlat_variant_alias_resolves_canonically():
 
 
 def test_non_scalar_memory_gate_modes_are_rejected():
-    import pytest
-
     with pytest.raises(ValueError, match="fixed to scalar"):
         ExperimentConfig.from_dict(
             {
@@ -172,3 +171,16 @@ def test_ntp_pass_weights_cli_parses_json_list(tmp_path):
     )
     config, _ = resolve_config(args)
     assert config.objective.ntp_pass_weights == [0.0, 0.0, 0.5, 0.5]
+
+
+def test_resume_rejects_config_mutating_overrides(tmp_path):
+    args = parse_args(
+        [
+            "--resume-from",
+            str(tmp_path / "latest.pt"),
+            "--variant",
+            "memory_tape_nmp",
+        ]
+    )
+    with pytest.raises(ValueError, match="only accepts --steps and --device"):
+        resolve_config(args)

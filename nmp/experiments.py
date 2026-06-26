@@ -148,6 +148,18 @@ def _best_validation_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return min(validation, key=lambda row: float(row["final_pass_nll"]))
 
 
+def _metric_with_fallback(
+    primary: dict[str, Any],
+    fallback: dict[str, Any],
+    key: str,
+    default: Any = None,
+) -> Any:
+    value = primary.get(key)
+    if value is not None:
+        return value
+    return fallback.get(key, default)
+
+
 def load_run_record(
     run_dir: str | Path,
     *,
@@ -174,6 +186,7 @@ def load_run_record(
     best_validation = _best_validation_row(metrics)
     evaluation = _read_evaluation(artifacts.evaluation_path)
     evaluation_loss = evaluation["loss"]
+    diagnostic_loss = evaluation.get("diagnostic_loss")
     train_rows = [row for row in metrics if row.get("event") == "train"]
     wall_time_seconds = sum(
         float(row["wall_time_seconds"])
@@ -186,11 +199,32 @@ def load_run_record(
         for row in read_jsonl(artifacts.probe_metrics_path)
         if row.get("event") == "probe_validation"
     ]
-    transition_loss = evaluation_loss.get("transition_prediction_loss")
+    transition_loss = best_validation.get("transition_prediction_loss")
+    if transition_loss is None:
+        transition_loss = evaluation_loss.get("transition_prediction_loss")
     if transition_loss is None:
         transition_loss = evaluation_loss.get("memory_prediction_loss")
     parameters = evaluation.get("parameters", {})
     generation = evaluation.get("generation", {})
+    final_pass_nll = float(best_validation["final_pass_nll"])
+    perplexity = _metric_with_fallback(
+        best_validation,
+        evaluation_loss,
+        "perplexity",
+    )
+    pass_nlls = _metric_with_fallback(
+        best_validation,
+        evaluation_loss,
+        "pass_nlls",
+        [],
+    )
+    diagnostic_final_pass_nll = (
+        None
+        if diagnostic_loss is None
+        else diagnostic_loss.get("final_pass_nll")
+    )
+    if diagnostic_final_pass_nll is None and "protocol" not in evaluation:
+        diagnostic_final_pass_nll = evaluation_loss.get("final_pass_nll")
 
     return {
         "scale": scale,
@@ -203,14 +237,26 @@ def load_run_record(
         ),
         "transition_target": transition_target_for_variant(spec.variant),
         "run_dir": str(run_dir),
-        "best_checkpoint_final_pass_nll": float(
-            best_validation["final_pass_nll"]
-        ),
+        "best_checkpoint_final_pass_nll": final_pass_nll,
         "best_checkpoint_step": int(best_validation["step"]),
-        "final_pass_nll": float(evaluation_loss["final_pass_nll"]),
-        "perplexity": float(evaluation_loss["perplexity"]),
-        "pass_nlls": list(map(float, evaluation_loss["pass_nlls"])),
-        "ntp_pass_weights": evaluation_loss.get("ntp_pass_weights"),
+        "final_pass_nll": final_pass_nll,
+        "perplexity": None if perplexity is None else float(perplexity),
+        "pass_nlls": list(map(float, pass_nlls)),
+        "ntp_pass_weights": _metric_with_fallback(
+            best_validation,
+            evaluation_loss,
+            "ntp_pass_weights",
+        ),
+        "evaluation_final_pass_nll": float(evaluation_loss["final_pass_nll"]),
+        "diagnostic_final_pass_nll": (
+            None
+            if diagnostic_final_pass_nll is None
+            else float(diagnostic_final_pass_nll)
+        ),
+        "loss_batches": evaluation.get("protocol", {}).get("loss_batches"),
+        "diagnostic_batches": evaluation.get("protocol", {}).get(
+            "diagnostic_batches"
+        ),
         "transition_prediction_loss": (
             None if transition_loss is None else float(transition_loss)
         ),
@@ -288,6 +334,8 @@ def summarize_conditions(
     scalar_fields = (
         "best_checkpoint_final_pass_nll",
         "final_pass_nll",
+        "evaluation_final_pass_nll",
+        "diagnostic_final_pass_nll",
         "perplexity",
         "transition_prediction_loss",
         "parameters_model",
@@ -475,6 +523,8 @@ def write_summary_markdown(
         f"# Round 1 {scale.title()} Summary",
         "",
         "Validation metrics are reported; no separate held-out test set is used.",
+        "Primary loss columns use the checkpoint-selection validation estimate,",
+        "while diagnostic loss columns use the smaller diagnostics batch count.",
         "",
         "## Selected transition weights",
         "",
@@ -504,8 +554,8 @@ def write_summary_markdown(
             "",
             "## Conditions",
             "",
-            "| Variant | λ | NTP weights | Final-pass NLL | Perplexity | Transition loss |",
-            "|---|---:|---|---:|---:|---:|",
+            "| Variant | λ | NTP weights | Final-pass NLL | Diagnostic NLL | Perplexity | Transition loss |",
+            "|---|---:|---|---:|---:|---:|---:|",
         ]
     )
     for row in condition_summary:
@@ -526,10 +576,17 @@ def write_summary_markdown(
             if weights is None
             else ", ".join(f"{float(weight):g}" for weight in weights)
         )
+        diagnostic = row.get("diagnostic_final_pass_nll")
+        diagnostic_text = (
+            "—"
+            if diagnostic is None
+            else f"{diagnostic['mean']:.4f} ± {diagnostic['std']:.4f}"
+        )
         lines.append(
             f"| `{row['variant']}` | {lambda_text} | {weights_text} | "
             f"{row['final_pass_nll']['mean']:.4f} ± "
             f"{row['final_pass_nll']['std']:.4f} | "
+            f"{diagnostic_text} | "
             f"{row['perplexity']['mean']:.3f} ± "
             f"{row['perplexity']['std']:.3f} | {transition_text} |"
         )

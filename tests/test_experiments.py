@@ -103,11 +103,25 @@ def _write_synthetic_run(
     write_json(
         artifacts.evaluation_path,
         {
+            "protocol": {
+                "config_source": "checkpoint",
+                "loss_source": "training.eval_batches",
+                "loss_batches": 20,
+                "diagnostic_source": "evaluation.diagnostic_batches",
+                "diagnostic_batches": 8,
+                "checkpoint_selection_metric": "final_pass_nll",
+            },
             "loss": {
                 "final_pass_nll": best_nll + 0.05,
                 "perplexity": 20.0 + best_nll,
                 "pass_nlls": pass_nlls,
                 "transition_prediction_loss": 0.2 if transition else None,
+            },
+            "diagnostic_loss": {
+                "final_pass_nll": best_nll + 9.0,
+                "perplexity": 200.0 + best_nll,
+                "pass_nlls": [value + 9.0 for value in pass_nlls],
+                "transition_prediction_loss": 9.0 if transition else None,
             },
             "parameters": {
                 "model": 100,
@@ -187,6 +201,12 @@ def test_development_summary_selects_mean_best_checkpoint_nll(tmp_path: Path):
         assert (output_dir / filename).exists()
     payload = json.loads((output_dir / "summary.json").read_text())
     assert payload["selection_criterion"].startswith("lowest mean")
+    transformer_run = next(
+        row for row in payload["runs"] if row["variant"] == "transformer_ntp"
+    )
+    assert transformer_run["final_pass_nll"] == 3.0
+    assert transformer_run["evaluation_final_pass_nll"] == 3.05
+    assert transformer_run["diagnostic_final_pass_nll"] == 12.0
 
 
 def test_reference_manifest_has_twelve_runs():

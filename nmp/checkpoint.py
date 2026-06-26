@@ -67,6 +67,7 @@ def restore_checkpoint(
     optimizer=None,
     scaler=None,
     sampler=None,
+    restore_rng: bool = True,
 ) -> None:
     model.load_state_dict(checkpoint["model_state_dict"])
     saved_predictor = checkpoint.get("predictor_state_dict")
@@ -80,9 +81,10 @@ def restore_checkpoint(
         scaler.load_state_dict(checkpoint["scaler_state_dict"])
     if sampler is not None:
         sampler.load_state_dict(checkpoint["sampler_state"])
+    if not restore_rng:
+        return
     random.setstate(checkpoint["python_random_state"])
-    torch.set_rng_state(checkpoint["torch_rng_state"])
+    torch.set_rng_state(checkpoint["torch_rng_state"].cpu())
     cuda_state = checkpoint.get("cuda_rng_state_all")
     if cuda_state is not None and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(cuda_state)
-
+        torch.cuda.set_rng_state_all([state.cpu() for state in cuda_state])

@@ -82,6 +82,9 @@ internally.
 The auxiliary predictor is training-only. Best checkpoints and transition
 weights are selected solely by final-pass validation NLL. Validation metrics
 are averaged over valid target tokens or valid transitions, not batches.
+The primary reported validation NLL uses the same `training.eval_batches`
+budget as checkpoint selection; smaller `evaluation.diagnostic_batches` runs
+are reported only as diagnostics for representation and generation artifacts.
 
 Optional KL/logit matching, chunked memory, a plain-Transformer transition
 condition, and non-teacher-forced objectives are deferred.

@@ -54,11 +54,31 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def validate_resume_args(args) -> None:
+    forbidden = {
+        "--config": args.config,
+        "--run-dir": args.run_dir,
+        "--seed": args.seed,
+        "--variant": args.variant,
+        "--lambda-transition": args.lambda_transition,
+        "--ntp-pass-weights": args.ntp_pass_weights,
+        "--train-file": args.train_file,
+        "--val-file": args.val_file,
+    }
+    used = [name for name, value in forbidden.items() if value is not None]
+    if used:
+        raise ValueError(
+            "--resume-from only accepts --steps and --device overrides; "
+            "remove " + ", ".join(used)
+        )
+
+
 def resolve_config(args) -> tuple[ExperimentConfig, Path]:
     if args.resume_from is not None:
+        validate_resume_args(args)
         checkpoint = load_checkpoint(args.resume_from)
         config = ExperimentConfig.from_dict(checkpoint["config"])
-        run_dir = args.run_dir or (
+        run_dir = (
             args.resume_from if args.resume_from.is_dir() else args.resume_from.parent
         )
     else:
