@@ -9,7 +9,16 @@ import yaml
 from .provenance import DATASET_NAME, DATASET_REVISION
 
 
-VARIANTS = ("transformer_ntp", "memory_tape_ntp", "memory_tape_nmp")
+VARIANTS = (
+    "transformer_ntp",
+    "memory_tape_ntp",
+    "memory_tape_nmp",
+    "memory_tape_hidden_transition",
+)
+TRANSITION_VARIANTS = (
+    "memory_tape_nmp",
+    "memory_tape_hidden_transition",
+)
 PRECISIONS = ("float32", "bfloat16", "float16")
 
 
@@ -61,13 +70,22 @@ class DataConfig:
 
 @dataclass(kw_only=True)
 class ObjectiveConfig:
-    lambda_memory: float = 1.0
+    lambda_transition: float = 1.0
     memory_horizon: int = 1
     dynamics_projection_factor: float = 1.3
 
+    @property
+    def lambda_memory(self) -> float:
+        """Compatibility alias for pre-Round-1 callers."""
+        return self.lambda_transition
+
+    @lambda_memory.setter
+    def lambda_memory(self, value: float) -> None:
+        self.lambda_transition = value
+
     def validate(self) -> None:
-        if self.lambda_memory < 0:
-            raise ValueError("lambda_memory must be non-negative")
+        if self.lambda_transition < 0:
+            raise ValueError("lambda_transition must be non-negative")
         if self.memory_horizon != 1:
             raise ValueError("only memory_horizon=1 is implemented")
         if self.dynamics_projection_factor <= 0:
@@ -159,17 +177,37 @@ class ExperimentConfig:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ExperimentConfig":
+        objective_payload = dict(payload.get("objective", {}))
+        legacy_lambda = objective_payload.pop("lambda_memory", None)
+        if "lambda_transition" not in objective_payload and legacy_lambda is not None:
+            objective_payload["lambda_transition"] = legacy_lambda
+        elif (
+            legacy_lambda is not None
+            and float(legacy_lambda)
+            != float(objective_payload["lambda_transition"])
+        ):
+            raise ValueError(
+                "objective.lambda_memory and objective.lambda_transition disagree"
+            )
         config = cls(
             name=str(payload["name"]),
             seed=int(payload.get("seed", 0)),
             model=ModelConfig(**payload["model"]),
             data=DataConfig(**payload.get("data", {})),
-            objective=ObjectiveConfig(**payload.get("objective", {})),
+            objective=ObjectiveConfig(**objective_payload),
             training=TrainingConfig(**payload["training"]),
             evaluation=EvaluationConfig(**payload.get("evaluation", {})),
         )
         config.validate()
         return config
+
+
+def transition_target_for_variant(variant: str) -> str | None:
+    if variant == "memory_tape_nmp":
+        return "memory"
+    if variant == "memory_tape_hidden_transition":
+        return "hidden"
+    return None
 
 
 def load_config(path: str | Path) -> ExperimentConfig:
@@ -185,4 +223,3 @@ def save_config(path: str | Path, config: ExperimentConfig) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(config.to_dict(), handle, sort_keys=False)
-

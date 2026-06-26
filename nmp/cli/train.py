@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from nmp.checkpoint import load_checkpoint
-from nmp.config import ExperimentConfig, load_config
+from nmp.config import ExperimentConfig, VARIANTS, load_config
 from nmp.evaluation import evaluate_run
 from nmp.plotting import plot_run
 from nmp.training import train_experiment
@@ -20,8 +20,9 @@ def parse_args(argv=None):
     parser.add_argument("--seed", type=int)
     parser.add_argument(
         "--variant",
-        choices=["transformer_ntp", "memory_tape_ntp", "memory_tape_nmp"],
+        choices=VARIANTS,
     )
+    parser.add_argument("--lambda-transition", type=float)
     parser.add_argument("--lambda-memory", type=float)
     parser.add_argument("--train-file")
     parser.add_argument("--val-file")
@@ -49,8 +50,17 @@ def resolve_config(args) -> tuple[ExperimentConfig, Path]:
     if args.variant is not None:
         config.model.variant = args.variant
         config.name = f"{config.name}-{args.variant}"
-    if args.lambda_memory is not None:
-        config.objective.lambda_memory = args.lambda_memory
+    if args.lambda_transition is not None and args.lambda_memory is not None:
+        raise ValueError(
+            "--lambda-transition and legacy --lambda-memory are mutually exclusive"
+        )
+    lambda_transition = (
+        args.lambda_transition
+        if args.lambda_transition is not None
+        else args.lambda_memory
+    )
+    if lambda_transition is not None:
+        config.objective.lambda_transition = lambda_transition
     if args.train_file is not None or args.val_file is not None:
         if args.train_file is None or args.val_file is None:
             raise ValueError("--train-file and --val-file must be provided together")

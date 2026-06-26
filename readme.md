@@ -2,8 +2,8 @@
 
 This repository asks whether a language model learns better persistent
 memories when it is explicitly trained to predict how those memories evolve.
-The first study is deliberately small and controlled: TinyStories,
-trunk-matched models, and no chunked-memory machinery.
+The first study uses TinyStories, trunk-matched models, and no chunked-memory
+machinery.
 
 ## Motivation
 
@@ -15,106 +15,93 @@ pressure on a model to represent structure that is both predictable and useful
 for future prediction?
 
 NextLat predicts a recurrent future latent while retaining next-token
-prediction. Its latent state is an information bottleneck through which
-successive predictions pass. Next Memory Prediction explores a different
-inductive bias: a multi-pass transformer emits a persistent tape of memories
-\(m_1,\ldots,m_t\), and later predictions can attend directly to the whole
-causal prefix of that tape. An auxiliary temporal objective then asks each
-memory to help predict its successor.
+prediction. Next Memory Prediction explores a related inductive bias: a
+multi-pass transformer emits a persistent tape of memories
+\(m_1,\ldots,m_t\), and later predictions can attend directly to the causal
+prefix of that tape.
 
 The hypothesis is not that latent prediction automatically creates semantic
 representations. It is that, alongside next-token prediction and with a
-stop-gradient target, it may encourage memories to encode stable predictive
-structure that survives across positions and passes. The repository is built
-to test that claim rather than assume it.
+stop-gradient target, it may encourage stable predictive structure. Round 1
+therefore separates the effect of the MemoryTape architecture from generic
+latent-transition regularization and transition regularization applied
+specifically to projected memories.
 
-Background material and working notes live in [`documents/`](documents/),
-including the NextLat and Belief State Transformer papers and a note outlining
-the case against predicting latents.
+Background material and working notes live in [`documents/`](documents/).
+Copied-code, tokenizer, and dataset provenance is pinned in
+[`PROVENANCE.md`](PROVENANCE.md).
 
-## Experiment
+## Round 1 conditions
 
-The study compares three models:
+1. `transformer_ntp`: causal Transformer with next-token prediction.
+2. `memory_tape_ntp`: MemoryTape Transformer with equal NTP loss on every pass.
+3. `memory_tape_nmp`: the same MemoryTape model with a final-pass memory
+   transition objective.
+4. `memory_tape_hidden_transition`: the same MemoryTape model with a final-pass
+   hidden-state transition objective.
 
-1. `transformer_ntp`: a causal transformer trained with next-token prediction.
-2. `memory_tape_ntp`: a multi-pass Memory-Tape Transformer trained with
-   next-token prediction on every pass.
-3. `memory_tape_nmp`: the same Memory-Tape Transformer with auxiliary temporal
-   next-memory prediction.
+Conditions 2–4 have identical model architecture and initialization under a
+matched seed. Conditions 3 and 4 also use identically shaped and initialized
+training-only transition predictors.
 
-Chunked MPTT and a direct NextLat baseline are deferred. The active package
-contains no chunk IDs, chunk tokens, or chunked-attention paths.
+The comparisons answer:
 
-MemoryTape generation supports exact `recompute` inference and recurrent
-`final_pass` inference. The recurrent path always warms up on the prompt and
-reuses the final pass's memory tape; there is no selectable pass-source flag.
+- 1 → 2: effect of the MemoryTape architecture.
+- 2 → 3: effect of explicit-memory transition regularization.
+- 2 → 4: effect of generic hidden-state transition regularization.
+- 4 → 3: whether projected memories help beyond hidden-state regularization.
 
-For final-pass memory tape \(M=[m_1,\ldots,m_T]\), a residual dynamics MLP
-predicts the next memory from the current memory and next-token embedding:
+## Objective
+
+For either final-pass memory or normalized hidden state \(z_t\), the shared
+residual predictor is:
 
 ```math
-\hat m_{t+1} = m_t + f_\psi([m_t, e(x_{t+1})]).
+\hat z_{t+1} = z_t + f_\psi([z_t, e(x_{t+1})]).
 ```
 
-The target memory is stop-gradient. Transitions into EOS or padding are
-excluded:
+The target is stop-gradient, and transitions into EOS or padding are excluded:
 
 ```math
-L_\mathrm{NMP}
-= \operatorname{SmoothL1}(\hat m_{t+1}, \operatorname{sg}(m_{t+1})).
+L_\mathrm{transition}
+= \operatorname{SmoothL1}(\hat z_{t+1}, \operatorname{sg}(z_{t+1})).
 ```
 
-The current objective is:
+For \(K\) MemoryTape passes:
 
 ```math
 L = \frac{1}{K}\sum_{k=1}^K L_\mathrm{NTP}^{(k)}
-    + \lambda_\mathrm{memory}L_\mathrm{NMP}.
+    + \lambda_\mathrm{transition}L_\mathrm{transition}.
 ```
 
-Optional stop-gradient logit matching via KL, analogous to NextLat's
-consistency term, is planned but intentionally not part of this first
-implementation.
+The auxiliary predictor is training-only. Best checkpoints and transition
+weights are selected solely by final-pass validation NLL. Validation metrics
+are averaged over valid target tokens or valid transitions, not batches.
 
-## Repository layout
+Optional KL/logit matching, chunked memory, a plain-Transformer transition
+condition, and non-teacher-forced objectives are deferred.
 
-- `nmp/`: models, objectives, data, training, evaluation, probes, and plots.
-- `configs/`: one reusable preset for each experiment scale.
-- `scripts/`: experiment-matrix helpers.
-- `tests/`: offline unit and end-to-end smoke tests.
-- `documents/`: papers and research notes.
-
-Copied-code and data provenance is pinned in
-[`PROVENANCE.md`](PROVENANCE.md).
-
-## Install and run
+## Install and individual runs
 
 ```bash
 python -m pip install -e ".[dev]"
 ```
 
-Run any model variant from the same smoke preset:
+All variants use the same scale preset:
 
 ```bash
 python -m nmp.cli.train \
   --config configs/smoke.yaml \
-  --variant transformer_ntp \
-  --run-dir runs/smoke/transformer
-
-python -m nmp.cli.train \
-  --config configs/smoke.yaml \
-  --variant memory_tape_ntp \
-  --run-dir runs/smoke/memory_tape
-
-python -m nmp.cli.train \
-  --config configs/smoke.yaml \
-  --variant memory_tape_nmp \
-  --run-dir runs/smoke/memory_tape_nmp
+  --variant memory_tape_hidden_transition \
+  --lambda-transition 1.0 \
+  --run-dir runs/smoke/memory_tape_hidden_transition
 ```
 
-The default data source is the pinned Hugging Face TinyStories revision. For
-each story, sequences that fit are terminated with EOS and padded; stories
-that exceed the context window are truncated without an artificial EOS token.
-For offline work, supply line-delimited local files:
+The legacy `--lambda-memory` flag and `objective.lambda_memory` configuration
+field remain accepted, but resolved configurations always use
+`lambda_transition`.
+
+For offline work, provide line-delimited local story files:
 
 ```bash
 python -m nmp.cli.train \
@@ -125,6 +112,9 @@ python -m nmp.cli.train \
   --run-dir runs/local/nmp
 ```
 
+Stories that fit within the context receive EOS and padding. Longer stories
+are truncated without an artificial EOS token.
+
 Resume, evaluate, probe, and plot:
 
 ```bash
@@ -134,50 +124,59 @@ python -m nmp.cli.probe --run-dir runs/local/nmp --steps 100
 python -m nmp.cli.plot --run-dir runs/local/nmp
 ```
 
-Each run records its resolved configuration, provenance, JSONL metrics,
-checkpoints, generated samples, evaluation results, probe results, and plots.
-Best checkpoints are selected by final-pass validation NLL, not combined
-training loss. Validation NLLs are averaged over valid target tokens rather
-than over batches.
+MemoryTape generation supports exact `recompute` inference and recurrent
+`final_pass` inference. The recurrent path always reuses final-pass memory.
 
-## Protocol
+## Experiment matrices
 
-Development runs use seeds `0`, `1`, and `2`. For `memory_tape_nmp`, sweep
-`lambda_memory` over `0.1`, `0.3`, `1.0`, and `3.0`, then choose the reference
-value by lowest mean final-pass validation NLL across seeds. The helper script
-is [`scripts/run_development_matrix.sh`](scripts/run_development_matrix.sh).
+The development matrix contains 30 runs:
 
-Run the CPU test suite with:
+- Seeds `0`, `1`, and `2`.
+- One run per seed for both NTP baselines.
+- Both transition variants at
+  `lambda_transition ∈ {0.1, 0.3, 1.0, 3.0}`.
+
+Run and summarize it with:
+
+```bash
+bash scripts/run_development_matrix.sh runs
+```
+
+This selects a transition weight separately for conditions 3 and 4 using the
+lowest mean best-checkpoint final-pass validation NLL across seeds.
+
+The reference matrix promotes all four conditions to 100k steps and three
+seeds, for 12 runs:
+
+```bash
+bash scripts/run_reference_matrix.sh runs
+```
+
+The reference launcher consumes
+`runs/development/summary/selected_lambdas.json`. Both launchers resume
+existing checkpoints and train probes before generating their summaries.
+
+The summary command can also be run directly:
+
+```bash
+python -m nmp.cli.summarize \
+  --runs-root runs \
+  --scale development \
+  --output-dir runs/development/summary
+```
+
+Each summary verifies the complete expected matrix and emits JSON, CSV,
+Markdown, selected weights, and a comparison plot. Reports include individual
+seeds, mean and standard deviation, paired-seed deltas, token and transition
+losses, parameter counts, throughput, generation agreement, representation
+diagnostics, and hidden/memory probes. These are validation results; the same
+10,000-story validation set is used for checkpoint selection, weight
+selection, and reporting.
+
+## Tests
 
 ```bash
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q
 ```
 
 Tests and smoke workflows use local fixtures and require no network access.
-
-# Provenance
-
-The active transformer and memory-tape implementation is adapted from:
-
-- Repository: `https://github.com/PeterBjerreHansen/multi-pass-transformer-training`
-- Commit: `e76089399d28c5a5a7fac6471455e5fa7f857225`
-- Copied components: transformer primitives, causal transformer, multi-pass
-  recurrence, memory-tape cross-attention, memory gates, and generation modes.
-
-The vendored 1,000-token TinyStories tokenizer comes from:
-
-- Repository: `https://github.com/JaydenTeoh/NextLat`
-- Commit: `3770be6009cea2b3c455a9ce7f2ca88b504bb955`
-- Source path: `data/tinystories/tokenizer.json`
-- Local representation: the exact tokenizer JSON is compressed and embedded
-  in `nmp/tokenizer_asset.py`; it is reconstructed in memory when loaded.
-
-The default dataset is:
-
-- Hugging Face dataset: `karpathy/tinystories-gpt4-clean`
-- Revision: `0397e27157956705a0260709da3095bb9c43d6a7`
-- License declared by the dataset card: CDLA-Sharing-1.0
-
-Local extensions include structured model outputs, padding-aware objectives,
-temporal next-memory prediction, experiment configuration, checkpointing,
-TinyStories loading, representation diagnostics, probing, and plotting.

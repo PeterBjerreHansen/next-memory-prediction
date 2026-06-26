@@ -543,8 +543,8 @@ def round_to_multiple(value: float, multiple: int) -> int:
     return multiple * round(value / multiple)
 
 
-class MemoryDynamicsPredictor(nn.Module):
-    """Training-only horizon-one memory dynamics model."""
+class LatentTransitionPredictor(nn.Module):
+    """Training-only horizon-one residual latent-transition model."""
 
     def __init__(self, n_embd: int, *, projection_factor: float = 1.3):
         super().__init__()
@@ -567,11 +567,18 @@ class MemoryDynamicsPredictor(nn.Module):
 
     def forward(
         self,
-        current_memory: torch.Tensor,
+        current_latent: torch.Tensor,
         next_token_embeddings: torch.Tensor,
     ) -> torch.Tensor:
-        inputs = self.norm(torch.cat((next_token_embeddings, current_memory), dim=-1))
-        return current_memory + self.mlp(inputs)
+        inputs = self.norm(
+            torch.cat((next_token_embeddings, current_latent), dim=-1)
+        )
+        return current_latent + self.mlp(inputs)
 
     def get_num_params(self) -> int:
         return sum(parameter.numel() for parameter in self.parameters())
+
+
+# Public compatibility alias for checkpoints and downstream imports created
+# before the predictor was generalized beyond memory states.
+MemoryDynamicsPredictor = LatentTransitionPredictor

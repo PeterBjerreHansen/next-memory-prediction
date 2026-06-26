@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import torch
 
 from conftest import make_config
@@ -10,10 +11,18 @@ from nmp.checkpoint import load_checkpoint
 from nmp.training import train_experiment
 
 
-def test_checkpoint_resume_is_exact(local_story_files, tmp_path: Path):
+@pytest.mark.parametrize(
+    "variant",
+    ["memory_tape_nmp", "memory_tape_hidden_transition"],
+)
+def test_checkpoint_resume_is_exact(
+    variant,
+    local_story_files,
+    tmp_path: Path,
+):
     train_file, val_file = local_story_files
     full_config = make_config(
-        "memory_tape_nmp",
+        variant,
         train_file,
         val_file,
         train_steps=4,
@@ -22,7 +31,7 @@ def test_checkpoint_resume_is_exact(local_story_files, tmp_path: Path):
     train_experiment(full_config, run_dir=full_dir)
 
     partial_config = make_config(
-        "memory_tape_nmp",
+        variant,
         train_file,
         val_file,
         train_steps=2,
@@ -30,7 +39,7 @@ def test_checkpoint_resume_is_exact(local_story_files, tmp_path: Path):
     resumed_dir = tmp_path / "resumed"
     train_experiment(partial_config, run_dir=resumed_dir)
     resume_config = make_config(
-        "memory_tape_nmp",
+        variant,
         train_file,
         val_file,
         train_steps=4,
@@ -57,4 +66,3 @@ def test_checkpoint_resume_is_exact(local_story_files, tmp_path: Path):
         3,
         4,
     ]
-

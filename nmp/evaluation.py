@@ -8,7 +8,11 @@ import torch
 
 from .artifacts import append_jsonl, artifacts_for, write_json
 from .checkpoint import load_checkpoint, restore_checkpoint
-from .config import ExperimentConfig, load_config
+from .config import (
+    ExperimentConfig,
+    load_config,
+    transition_target_for_variant,
+)
 from .data import (
     TinyStoriesTokenizer,
     load_corpora,
@@ -43,7 +47,7 @@ def evaluate_batches(
     totals: dict[str, float] = defaultdict(float)
     pass_totals: list[float] | None = None
     ntp_token_count = 0
-    memory_transition_count = 0
+    transition_count = 0
     for cpu_batch in batches:
         tokens = cpu_batch.tokens.to(device)
         with autocast_context(device, config.training.precision):
@@ -56,7 +60,7 @@ def evaluate_batches(
                 pad_token_id=tokenizer.pad_id,
                 eos_token_id=tokenizer.eos_id,
                 predictor=predictor,
-                lambda_memory=config.objective.lambda_memory,
+                lambda_transition=config.objective.lambda_transition,
             )
         metrics = losses.detached_metrics()
         batch_ntp_tokens = int(
@@ -69,9 +73,9 @@ def evaluate_batches(
             float(metrics["final_pass_nll"]) * batch_ntp_tokens
         )
         ntp_token_count += batch_ntp_tokens
-        if metrics["memory_prediction_loss"] is not None:
+        if metrics["transition_prediction_loss"] is not None:
             next_tokens = tokens[:, 1:]
-            batch_memory_transitions = int(
+            batch_transitions = int(
                 (
                     (next_tokens != tokenizer.eos_id)
                     & (next_tokens != tokenizer.pad_id)
@@ -79,10 +83,10 @@ def evaluate_batches(
                 .sum()
                 .item()
             )
-            totals["memory_prediction_loss"] += float(
-                metrics["memory_prediction_loss"]
-            ) * batch_memory_transitions
-            memory_transition_count += batch_memory_transitions
+            totals["transition_prediction_loss"] += float(
+                metrics["transition_prediction_loss"]
+            ) * batch_transitions
+            transition_count += batch_transitions
         current_passes = list(map(float, metrics["pass_nlls"]))
         if pass_totals is None:
             pass_totals = [0.0] * len(current_passes)
@@ -103,14 +107,20 @@ def evaluate_batches(
     }
     result["perplexity"] = safe_perplexity(result["final_pass_nll"])
     if predictor is not None:
-        memory_prediction_loss = (
-            totals["memory_prediction_loss"] / memory_transition_count
-            if memory_transition_count
+        transition_prediction_loss = (
+            totals["transition_prediction_loss"] / transition_count
+            if transition_count
             else 0.0
         )
-        result["memory_prediction_loss"] = memory_prediction_loss
-        result["memory_transitions"] = memory_transition_count
-        result["loss"] += config.objective.lambda_memory * memory_prediction_loss
+        result["transition_prediction_loss"] = transition_prediction_loss
+        result["transition_target"] = transition_target_for_variant(
+            config.model.variant
+        )
+        result["transition_count"] = transition_count
+        result["lambda_transition"] = config.objective.lambda_transition
+        result["loss"] += (
+            config.objective.lambda_transition * transition_prediction_loss
+        )
     return result
 
 
@@ -336,6 +346,10 @@ def evaluate_run(
         "step": int(checkpoint["step"]),
         "checkpoint": checkpoint_name,
         "variant": config.model.variant,
+        "transition_target": transition_target_for_variant(
+            config.model.variant
+        ),
+        "lambda_transition": config.objective.lambda_transition,
         "parameters": count_parameters(model, predictor),
         "loss": loss_metrics,
         "representations": representations,

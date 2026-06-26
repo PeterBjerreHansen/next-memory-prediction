@@ -34,8 +34,8 @@ Round 2: Non-teacher-forced memory prediction
     Assign codes directly from the model’s own memories:
         c_t = VQ(norm(m_t))
     Predict:
-        m_t → p(c_{t+h})
-    Use h={1,2,4,8}.
+        m_t → p(c_{t+i})
+    Use i={1,2,4,8}.
     Track code usage/perplexity.
 
 3. Emitted chunk memories
@@ -51,8 +51,8 @@ Round 2: Non-teacher-forced memory prediction
     Quantize emitted chunk memories:
         C_j = VQ(norm(M_j))
     Predict:
-        M_j → p(C_{j+h})
-    Test chunk horizons h={1,2,4}.
+        M_j → p(C_{j+i})
+    Test chunk horizons i={1,2,4}.
 
 
 ### Open questions

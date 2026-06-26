@@ -1,25 +1,55 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-for seed in 0 1 2; do
-  python -m nmp.cli.train \
-    --config configs/development.yaml \
-    --variant transformer_ntp \
-    --seed "$seed" \
-    --run-dir "runs/development/transformer/seed_${seed}"
+runs_root="${1:-runs}"
 
-  python -m nmp.cli.train \
-    --config configs/development.yaml \
-    --variant memory_tape_ntp \
-    --seed "$seed" \
-    --run-dir "runs/development/memory_tape/seed_${seed}"
+run_one() {
+  local variant="$1"
+  local seed="$2"
+  local run_dir="$3"
+  local lambda_transition="${4:-}"
 
-  for lambda_memory in 0.1 0.3 1.0 3.0; do
+  if [[ -f "${run_dir}/latest.pt" ]]; then
     python -m nmp.cli.train \
-      --config configs/development.yaml \
-      --variant memory_tape_nmp \
-      --seed "$seed" \
-      --lambda-memory "$lambda_memory" \
-      --run-dir "runs/development/memory_tape_nmp/lambda_${lambda_memory}/seed_${seed}"
+      --resume-from "${run_dir}/latest.pt"
+  else
+    command=(
+      python -m nmp.cli.train
+      --config configs/development.yaml
+      --variant "$variant"
+      --seed "$seed"
+      --run-dir "$run_dir"
+    )
+    if [[ -n "$lambda_transition" ]]; then
+      command+=(--lambda-transition "$lambda_transition")
+    fi
+    "${command[@]}"
+  fi
+  python -m nmp.cli.probe --run-dir "$run_dir"
+}
+
+for seed in 0 1 2; do
+  run_one \
+    transformer_ntp \
+    "$seed" \
+    "${runs_root}/development/transformer_ntp/seed_${seed}"
+  run_one \
+    memory_tape_ntp \
+    "$seed" \
+    "${runs_root}/development/memory_tape_ntp/seed_${seed}"
+
+  for variant in memory_tape_nmp memory_tape_hidden_transition; do
+    for lambda_transition in 0.1 0.3 1.0 3.0; do
+      run_one \
+        "$variant" \
+        "$seed" \
+        "${runs_root}/development/${variant}/lambda_${lambda_transition}/seed_${seed}" \
+        "$lambda_transition"
+    done
   done
 done
+
+python -m nmp.cli.summarize \
+  --runs-root "$runs_root" \
+  --scale development \
+  --output-dir "${runs_root}/development/summary"

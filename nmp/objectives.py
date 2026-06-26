@@ -7,7 +7,7 @@ from torch.nn import functional as F
 
 from .models import (
     CausalTransformer,
-    MemoryDynamicsPredictor,
+    LatentTransitionPredictor,
     MemoryTapeOutput,
     MemoryTapeTransformer,
     TransformerOutput,
@@ -20,7 +20,8 @@ class LossBreakdown:
     weighted_ntp: torch.Tensor
     final_pass_nll: torch.Tensor
     pass_nlls: tuple[torch.Tensor, ...]
-    memory_prediction: torch.Tensor | None
+    transition_prediction: torch.Tensor | None
+    transition_target: str | None
 
     def detached_metrics(self) -> dict[str, object]:
         return {
@@ -28,11 +29,12 @@ class LossBreakdown:
             "weighted_ntp_loss": float(self.weighted_ntp.detach().cpu()),
             "final_pass_nll": float(self.final_pass_nll.detach().cpu()),
             "pass_nlls": [float(item.detach().cpu()) for item in self.pass_nlls],
-            "memory_prediction_loss": (
+            "transition_prediction_loss": (
                 None
-                if self.memory_prediction is None
-                else float(self.memory_prediction.detach().cpu())
+                if self.transition_prediction is None
+                else float(self.transition_prediction.detach().cpu())
             ),
+            "transition_target": self.transition_target,
         }
 
 
@@ -51,29 +53,49 @@ def next_token_loss(
     )
 
 
+def temporal_transition_prediction_loss(
+    model: MemoryTapeTransformer,
+    predictor: LatentTransitionPredictor,
+    latent_states: torch.Tensor,
+    tokens: torch.Tensor,
+    *,
+    eos_token_id: int,
+    pad_token_id: int,
+) -> torch.Tensor:
+    current_latent = latent_states[:, :-1, :]
+    target_latent = latent_states[:, 1:, :].detach()
+    next_tokens = tokens[:, 1:]
+    next_token_embeddings = model.token_embeddings(next_tokens)
+    predicted_latent = predictor(current_latent, next_token_embeddings)
+    valid = (next_tokens != eos_token_id) & (next_tokens != pad_token_id)
+    elementwise = F.smooth_l1_loss(
+        predicted_latent,
+        target_latent,
+        reduction="none",
+    )
+    weights = valid.unsqueeze(-1).to(elementwise.dtype)
+    denominator = weights.expand_as(elementwise).sum().clamp_min(1.0)
+    return (elementwise * weights).sum() / denominator
+
+
 def temporal_memory_prediction_loss(
     model: MemoryTapeTransformer,
-    predictor: MemoryDynamicsPredictor,
+    predictor: LatentTransitionPredictor,
     memory_states: torch.Tensor,
     tokens: torch.Tensor,
     *,
     eos_token_id: int,
     pad_token_id: int,
 ) -> torch.Tensor:
-    current_memory = memory_states[:, :-1, :]
-    target_memory = memory_states[:, 1:, :].detach()
-    next_tokens = tokens[:, 1:]
-    next_token_embeddings = model.token_embeddings(next_tokens)
-    predicted_memory = predictor(current_memory, next_token_embeddings)
-    valid = (next_tokens != eos_token_id) & (next_tokens != pad_token_id)
-    elementwise = F.smooth_l1_loss(
-        predicted_memory,
-        target_memory,
-        reduction="none",
+    """Compatibility wrapper for the original memory-only objective."""
+    return temporal_transition_prediction_loss(
+        model,
+        predictor,
+        memory_states,
+        tokens,
+        eos_token_id=eos_token_id,
+        pad_token_id=pad_token_id,
     )
-    weights = valid.unsqueeze(-1).to(elementwise.dtype)
-    denominator = weights.expand_as(elementwise).sum().clamp_min(1.0)
-    return (elementwise * weights).sum() / denominator
 
 
 def compute_loss(
@@ -84,8 +106,8 @@ def compute_loss(
     tokens: torch.Tensor,
     pad_token_id: int,
     eos_token_id: int,
-    predictor: MemoryDynamicsPredictor | None = None,
-    lambda_memory: float = 1.0,
+    predictor: LatentTransitionPredictor | None = None,
+    lambda_transition: float = 1.0,
 ) -> LossBreakdown:
     if variant == "transformer_ntp":
         if not isinstance(output, TransformerOutput):
@@ -96,7 +118,8 @@ def compute_loss(
             weighted_ntp=nll,
             final_pass_nll=nll,
             pass_nlls=(nll,),
-            memory_prediction=None,
+            transition_prediction=None,
+            transition_target=None,
         )
 
     if not isinstance(model, MemoryTapeTransformer) or not isinstance(
@@ -108,20 +131,29 @@ def compute_loss(
         for logits in output.logits_per_pass
     )
     ntp_loss = torch.stack(pass_nlls).mean()
-    memory_loss = None
+    transition_loss = None
+    transition_target = None
     total = ntp_loss
-    if variant == "memory_tape_nmp":
+    if variant in {"memory_tape_nmp", "memory_tape_hidden_transition"}:
         if predictor is None:
-            raise ValueError("memory_tape_nmp requires a dynamics predictor")
-        memory_loss = temporal_memory_prediction_loss(
+            raise ValueError(f"{variant} requires a transition predictor")
+        transition_target = (
+            "memory" if variant == "memory_tape_nmp" else "hidden"
+        )
+        latent_states = (
+            output.memory_states
+            if transition_target == "memory"
+            else output.hidden_states
+        )
+        transition_loss = temporal_transition_prediction_loss(
             model,
             predictor,
-            output.memory_states,
+            latent_states,
             tokens,
             eos_token_id=eos_token_id,
             pad_token_id=pad_token_id,
         )
-        total = total + lambda_memory * memory_loss
+        total = total + lambda_transition * transition_loss
     elif variant != "memory_tape_ntp":
         raise ValueError(f"unknown variant: {variant}")
 
@@ -130,5 +162,6 @@ def compute_loss(
         weighted_ntp=ntp_loss,
         final_pass_nll=pass_nlls[-1],
         pass_nlls=pass_nlls,
-        memory_prediction=memory_loss,
+        transition_prediction=transition_loss,
+        transition_target=transition_target,
     )

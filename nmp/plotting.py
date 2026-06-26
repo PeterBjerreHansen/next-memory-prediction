@@ -10,6 +10,13 @@ import matplotlib.pyplot as plt
 from .artifacts import artifacts_for, read_jsonl
 
 
+def transition_loss_from_row(row: dict) -> float | None:
+    value = row.get("transition_prediction_loss")
+    if value is None:
+        value = row.get("memory_prediction_loss")
+    return value
+
+
 def plot_training(run_dir: str | Path) -> Path | None:
     artifacts = artifacts_for(run_dir)
     rows = read_jsonl(artifacts.metrics_path)
@@ -24,14 +31,14 @@ def plot_training(run_dir: str | Path) -> Path | None:
             [row["final_pass_nll"] for row in train],
             label="train final-pass NLL",
         )
-        memory_rows = [
-            row for row in train if row.get("memory_prediction_loss") is not None
+        transition_rows = [
+            row for row in train if transition_loss_from_row(row) is not None
         ]
-        if memory_rows:
+        if transition_rows:
             axes[1].plot(
-                [row["step"] for row in memory_rows],
-                [row["memory_prediction_loss"] for row in memory_rows],
-                label="memory prediction",
+                [row["step"] for row in transition_rows],
+                [transition_loss_from_row(row) for row in transition_rows],
+                label="transition prediction",
             )
     if validation:
         axes[0].plot(
@@ -109,4 +116,3 @@ def plot_run(run_dir: str | Path) -> list[Path]:
         for path in (plot_training(run_dir), plot_probes(run_dir))
         if path is not None
     ]
-

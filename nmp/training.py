@@ -7,7 +7,7 @@ import torch
 
 from .artifacts import append_jsonl, prepare_run
 from .checkpoint import load_checkpoint, restore_checkpoint, save_checkpoint
-from .config import ExperimentConfig
+from .config import ExperimentConfig, transition_target_for_variant
 from .data import (
     StatefulBatchStream,
     TinyStoriesTokenizer,
@@ -93,6 +93,10 @@ def train_experiment(
             "event": "run_start" if step == 0 else "run_resume",
             "step": step,
             "variant": config.model.variant,
+            "transition_target": transition_target_for_variant(
+                config.model.variant
+            ),
+            "lambda_transition": config.objective.lambda_transition,
             "device": str(device),
             "effective_batch_size": config.training.effective_batch_size,
             "parameters": parameter_counts,
@@ -133,7 +137,7 @@ def train_experiment(
                     pad_token_id=tokenizer.pad_id,
                     eos_token_id=tokenizer.eos_id,
                     predictor=runtime_predictor,
-                    lambda_memory=config.objective.lambda_memory,
+                    lambda_transition=config.objective.lambda_transition,
                 )
                 scaled_loss = (
                     losses.total / config.training.gradient_accumulation_steps
@@ -155,9 +159,9 @@ def train_experiment(
                         metrics["pass_nlls"],
                     )
                 ]
-                if metrics["memory_prediction_loss"] is not None:
-                    accumulated["memory_prediction_loss"] += metrics[
-                        "memory_prediction_loss"
+                if metrics["transition_prediction_loss"] is not None:
+                    accumulated["transition_prediction_loss"] += metrics[
+                        "transition_prediction_loss"
                     ]
 
         if scaler is not None:
@@ -180,8 +184,8 @@ def train_experiment(
         accumulated["pass_nlls"] = [
             value / divisor for value in accumulated["pass_nlls"]
         ]
-        if accumulated["memory_prediction_loss"] is not None:
-            accumulated["memory_prediction_loss"] /= divisor
+        if accumulated["transition_prediction_loss"] is not None:
+            accumulated["transition_prediction_loss"] /= divisor
 
         if step % config.training.log_interval == 0 or step == 1:
             synchronize(device)

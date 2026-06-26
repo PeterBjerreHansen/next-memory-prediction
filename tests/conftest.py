@@ -54,7 +54,7 @@ def make_config(
                 "val_file": str(val_file),
             },
             "objective": {
-                "lambda_memory": 1.0,
+                "lambda_transition": 1.0,
                 "memory_horizon": 1,
                 "dynamics_projection_factor": 1.3,
             },
@@ -81,4 +81,3 @@ def make_config(
             },
         }
     )
-

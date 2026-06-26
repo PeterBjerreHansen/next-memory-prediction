@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+import json
+import math
 from pathlib import Path
 
 import pytest
 
-from nmp.artifacts import artifacts_for
+from nmp.artifacts import artifacts_for, read_jsonl
+from nmp.checkpoint import load_checkpoint
 from nmp.cli.probe import main as probe_main
 from nmp.cli.train import main as train_main
 
 
 @pytest.mark.parametrize(
     "variant",
-    ["transformer_ntp", "memory_tape_ntp", "memory_tape_nmp"],
+    [
+        "transformer_ntp",
+        "memory_tape_ntp",
+        "memory_tape_nmp",
+        "memory_tape_hidden_transition",
+    ],
 )
 def test_offline_smoke_workflow(variant, local_story_files, tmp_path: Path):
     train_file, val_file = local_story_files
@@ -32,6 +40,16 @@ def test_offline_smoke_workflow(variant, local_story_files, tmp_path: Path):
             "cpu",
             "--steps",
             "1",
+        ]
+    )
+    train_main(
+        [
+            "--resume-from",
+            str(run_dir / "latest.pt"),
+            "--device",
+            "cpu",
+            "--steps",
+            "2",
         ]
     )
     probe_main(
@@ -59,3 +77,18 @@ def test_offline_smoke_workflow(variant, local_story_files, tmp_path: Path):
         artifacts.plots_dir / "probes.png",
     ):
         assert path.exists(), path
+    assert load_checkpoint(artifacts.latest_checkpoint)["step"] == 2
+    payloads = read_jsonl(artifacts.metrics_path)
+    payloads.append(json.loads(artifacts.evaluation_path.read_text()))
+
+    def assert_finite(value):
+        if isinstance(value, float):
+            assert math.isfinite(value)
+        elif isinstance(value, dict):
+            for child in value.values():
+                assert_finite(child)
+        elif isinstance(value, list):
+            for child in value:
+                assert_finite(child)
+
+    assert_finite(payloads)

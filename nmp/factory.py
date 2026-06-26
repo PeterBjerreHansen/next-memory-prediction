@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from .config import ExperimentConfig
+from .config import ExperimentConfig, TRANSITION_VARIANTS
 from .models import (
     CausalTransformer,
-    MemoryDynamicsPredictor,
+    LatentTransitionPredictor,
     MemoryTapeConfig,
     MemoryTapeTransformer,
     TransformerConfig,
@@ -16,7 +16,7 @@ def build_model(
     vocab_size: int,
 ) -> tuple[
     CausalTransformer | MemoryTapeTransformer,
-    MemoryDynamicsPredictor | None,
+    LatentTransitionPredictor | None,
 ]:
     model_config = config.model
     if model_config.variant == "transformer_ntp":
@@ -43,11 +43,11 @@ def build_model(
         )
     )
     predictor = (
-        MemoryDynamicsPredictor(
+        LatentTransitionPredictor(
             model_config.n_embd,
             projection_factor=config.objective.dynamics_projection_factor,
         )
-        if model_config.variant == "memory_tape_nmp"
+        if model_config.variant in TRANSITION_VARIANTS
         else None
     )
     return model, predictor
