@@ -137,13 +137,13 @@ def test_legacy_lambda_memory_cli_alias(tmp_path):
     assert "lambda_memory" not in config.to_dict()["objective"]
 
 
-def test_legacy_hidden_transition_variant_alias_resolves_canonically():
+def test_legacy_nextlat_variant_alias_resolves_canonically():
     config = ExperimentConfig.from_dict(
         {
             "name": "legacy-variant",
             "seed": 0,
             "model": {
-                "variant": "memory_tape_hidden_transition",
+                "variant": "memory_tape_nextlat_no_kl",
                 "block_size": 8,
                 "n_layer": 1,
                 "n_head": 1,
@@ -153,7 +153,7 @@ def test_legacy_hidden_transition_variant_alias_resolves_canonically():
             "training": {"train_steps": 1, "micro_batch_size": 1},
         }
     )
-    assert config.model.variant == "memory_tape_nextlat_no_kl"
+    assert config.model.variant == "memory_tape_hidden_transition"
 
 
 def test_ntp_pass_weights_validate_against_memory_tape_pass_count():

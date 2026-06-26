@@ -95,7 +95,7 @@ def _write_synthetic_run(
     )
     transition = variant in {
         "memory_tape_nmp",
-        "memory_tape_nextlat_no_kl",
+        "memory_tape_hidden_transition",
     }
     pass_nlls = [best_nll + 0.05]
     if variant != "transformer_ntp":
@@ -172,7 +172,7 @@ def test_development_summary_selects_mean_best_checkpoint_nll(tmp_path: Path):
     assert result["completed_runs"] == 30
     assert result["selected_lambdas"] == {
         "memory_tape_nmp": 0.3,
-        "memory_tape_nextlat_no_kl": 1.0,
+        "memory_tape_hidden_transition": 1.0,
     }
     assert len(result["all_condition_summary"]) == 10
     assert len(result["condition_summary"]) == 4
@@ -194,7 +194,7 @@ def test_reference_manifest_has_twelve_runs():
         "reference",
         selected_lambdas={
             "memory_tape_nmp": 0.3,
-            "memory_tape_nextlat_no_kl": 1.0,
+            "memory_tape_hidden_transition": 1.0,
         },
     )
     assert len(specs) == 12

@@ -392,10 +392,10 @@ def paired_comparisons(
     comparisons = (
         ("architecture", "transformer_ntp", "memory_tape_ntp"),
         ("memory_transition", "memory_tape_ntp", "memory_tape_nmp"),
-        ("nextlat_no_kl", "memory_tape_ntp", "memory_tape_nextlat_no_kl"),
+        ("hidden_transition", "memory_tape_ntp", "memory_tape_hidden_transition"),
         (
             "explicit_memory_vs_hidden",
-            "memory_tape_nextlat_no_kl",
+            "memory_tape_hidden_transition",
             "memory_tape_nmp",
         ),
     )

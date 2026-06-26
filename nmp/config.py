@@ -14,15 +14,15 @@ VARIANTS = (
     "transformer_ntp",
     "memory_tape_ntp",
     "memory_tape_nmp",
-    "memory_tape_nextlat_no_kl",
+    "memory_tape_hidden_transition",
 )
 LEGACY_VARIANT_ALIASES = {
-    "memory_tape_hidden_transition": "memory_tape_nextlat_no_kl",
+    "memory_tape_nextlat_no_kl": "memory_tape_hidden_transition",
 }
 ACCEPTED_VARIANTS = (*VARIANTS, *LEGACY_VARIANT_ALIASES)
 TRANSITION_VARIANTS = (
     "memory_tape_nmp",
-    "memory_tape_nextlat_no_kl",
+    "memory_tape_hidden_transition",
 )
 PRECISIONS = ("float32", "bfloat16", "float16")
 
@@ -242,7 +242,7 @@ def transition_target_for_variant(variant: str) -> str | None:
     variant = canonicalize_variant(variant)
     if variant == "memory_tape_nmp":
         return "memory"
-    if variant == "memory_tape_nextlat_no_kl":
+    if variant == "memory_tape_hidden_transition":
         return "hidden"
     return None
 

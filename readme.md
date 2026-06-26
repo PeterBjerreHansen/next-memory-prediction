@@ -37,7 +37,7 @@ Copied-code, tokenizer, and dataset provenance is pinned in
 2. `memory_tape_ntp`: MemoryTape Transformer with (pass-weighted) NTP loss.
 3. `memory_tape_nmp`: the same MemoryTape model with a final-pass memory
    transition objective.
-4. `memory_tape_nextlat_no_kl`: the same MemoryTape model with a final-pass
+4. `memory_tape_hidden_transition`: the same MemoryTape model with a final-pass
    hidden-state transition objective.
 
 Conditions 2–4 have identical model architecture and initialization under a
@@ -97,15 +97,15 @@ All variants use the same scale preset:
 ```bash
 python -m nmp.cli.train \
   --config configs/smoke.yaml \
-  --variant memory_tape_nextlat_no_kl \
+  --variant memory_tape_hidden_transition \
   --lambda-transition 1.0 \
-  --run-dir runs/smoke/memory_tape_nextlat_no_kl
+  --run-dir runs/smoke/memory_tape_hidden_transition
 ```
 
 The legacy `--lambda-memory` flag and `objective.lambda_memory` configuration
 field remain accepted, but resolved configurations always use
-`lambda_transition`. The old variant name `memory_tape_hidden_transition` is
-also accepted as a compatibility alias for `memory_tape_nextlat_no_kl`.
+`lambda_transition`. The old variant name `memory_tape_nextlat_no_kl` is also
+accepted as a compatibility alias for `memory_tape_hidden_transition`.
 
 For offline work, provide line-delimited local story files:
 
