@@ -18,7 +18,7 @@ from nmp.cli.train import main as train_main
         "transformer_ntp",
         "memory_tape_ntp",
         "memory_tape_nmp",
-        "memory_tape_hidden_transition",
+        "memory_tape_nextlat_no_kl",
     ],
 )
 def test_offline_smoke_workflow(variant, local_story_files, tmp_path: Path):

@@ -5,6 +5,11 @@ from dataclasses import dataclass
 import torch
 from torch.nn import functional as F
 
+from .config import (
+    TRANSITION_VARIANTS,
+    canonicalize_variant,
+    transition_target_for_variant,
+)
 from .models import (
     CausalTransformer,
     LatentTransitionPredictor,
@@ -20,6 +25,7 @@ class LossBreakdown:
     weighted_ntp: torch.Tensor
     final_pass_nll: torch.Tensor
     pass_nlls: tuple[torch.Tensor, ...]
+    ntp_pass_weights: tuple[float, ...]
     transition_prediction: torch.Tensor | None
     transition_target: str | None
 
@@ -29,6 +35,7 @@ class LossBreakdown:
             "weighted_ntp_loss": float(self.weighted_ntp.detach().cpu()),
             "final_pass_nll": float(self.final_pass_nll.detach().cpu()),
             "pass_nlls": [float(item.detach().cpu()) for item in self.pass_nlls],
+            "ntp_pass_weights": list(self.ntp_pass_weights),
             "transition_prediction_loss": (
                 None
                 if self.transition_prediction is None
@@ -36,6 +43,30 @@ class LossBreakdown:
             ),
             "transition_target": self.transition_target,
         }
+
+
+def normalize_pass_weights(
+    pass_count: int,
+    weights: list[float] | tuple[float, ...] | None,
+    *,
+    device: torch.device | None = None,
+) -> torch.Tensor:
+    if weights is None:
+        return torch.full(
+            (pass_count,),
+            1.0 / pass_count,
+            dtype=torch.float32,
+            device=device,
+        )
+    if len(weights) != pass_count:
+        raise ValueError("ntp_pass_weights must match the number of passes")
+    tensor = torch.as_tensor(weights, dtype=torch.float32, device=device)
+    if torch.any(~torch.isfinite(tensor)) or torch.any(tensor < 0):
+        raise ValueError("ntp_pass_weights must be finite and non-negative")
+    total = tensor.sum()
+    if float(total.detach().cpu()) <= 0.0:
+        raise ValueError("ntp_pass_weights must have positive sum")
+    return tensor / total
 
 
 def next_token_loss(
@@ -108,8 +139,12 @@ def compute_loss(
     eos_token_id: int,
     predictor: LatentTransitionPredictor | None = None,
     lambda_transition: float = 1.0,
+    ntp_pass_weights: list[float] | tuple[float, ...] | None = None,
 ) -> LossBreakdown:
+    variant = canonicalize_variant(variant)
     if variant == "transformer_ntp":
+        if ntp_pass_weights is not None:
+            raise ValueError("transformer_ntp does not use ntp_pass_weights")
         if not isinstance(output, TransformerOutput):
             raise TypeError("transformer_ntp requires TransformerOutput")
         nll = next_token_loss(output.logits, tokens, pad_token_id=pad_token_id)
@@ -118,6 +153,7 @@ def compute_loss(
             weighted_ntp=nll,
             final_pass_nll=nll,
             pass_nlls=(nll,),
+            ntp_pass_weights=(1.0,),
             transition_prediction=None,
             transition_target=None,
         )
@@ -130,16 +166,20 @@ def compute_loss(
         next_token_loss(logits, tokens, pad_token_id=pad_token_id)
         for logits in output.logits_per_pass
     )
-    ntp_loss = torch.stack(pass_nlls).mean()
+    normalized_weights = normalize_pass_weights(
+        len(pass_nlls),
+        ntp_pass_weights,
+        device=pass_nlls[0].device,
+    )
+    ntp_loss = (
+        torch.stack(pass_nlls) * normalized_weights.to(pass_nlls[0].dtype)
+    ).sum()
     transition_loss = None
-    transition_target = None
+    transition_target = transition_target_for_variant(variant)
     total = ntp_loss
-    if variant in {"memory_tape_nmp", "memory_tape_hidden_transition"}:
+    if variant in TRANSITION_VARIANTS:
         if predictor is None:
             raise ValueError(f"{variant} requires a transition predictor")
-        transition_target = (
-            "memory" if variant == "memory_tape_nmp" else "hidden"
-        )
         latent_states = (
             output.memory_states
             if transition_target == "memory"
@@ -162,6 +202,9 @@ def compute_loss(
         weighted_ntp=ntp_loss,
         final_pass_nll=pass_nlls[-1],
         pass_nlls=pass_nlls,
+        ntp_pass_weights=tuple(
+            float(weight.detach().cpu()) for weight in normalized_weights
+        ),
         transition_prediction=transition_loss,
         transition_target=transition_target,
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import math
 from pathlib import Path
 from typing import Any
 
@@ -13,13 +14,23 @@ VARIANTS = (
     "transformer_ntp",
     "memory_tape_ntp",
     "memory_tape_nmp",
-    "memory_tape_hidden_transition",
+    "memory_tape_nextlat_no_kl",
 )
+LEGACY_VARIANT_ALIASES = {
+    "memory_tape_hidden_transition": "memory_tape_nextlat_no_kl",
+}
+ACCEPTED_VARIANTS = (*VARIANTS, *LEGACY_VARIANT_ALIASES)
 TRANSITION_VARIANTS = (
     "memory_tape_nmp",
-    "memory_tape_hidden_transition",
+    "memory_tape_nextlat_no_kl",
 )
 PRECISIONS = ("float32", "bfloat16", "float16")
+
+
+def canonicalize_variant(variant: str) -> str:
+    if variant in LEGACY_VARIANT_ALIASES:
+        return LEGACY_VARIANT_ALIASES[variant]
+    return variant
 
 
 @dataclass(kw_only=True)
@@ -33,8 +44,10 @@ class ModelConfig:
     memory_tape_gate: str = "scalar"
 
     def validate(self) -> None:
+        self.variant = canonicalize_variant(self.variant)
         if self.variant not in VARIANTS:
-            raise ValueError(f"variant must be one of: {', '.join(VARIANTS)}")
+            accepted = ", ".join(ACCEPTED_VARIANTS)
+            raise ValueError(f"variant must be one of: {accepted}")
         if self.block_size < 2:
             raise ValueError("block_size must be at least 2")
         if min(self.n_layer, self.n_head, self.n_embd) < 1:
@@ -71,6 +84,7 @@ class DataConfig:
 @dataclass(kw_only=True)
 class ObjectiveConfig:
     lambda_transition: float = 1.0
+    ntp_pass_weights: list[float] | None = None
     memory_horizon: int = 1
     dynamics_projection_factor: float = 1.3
 
@@ -86,6 +100,19 @@ class ObjectiveConfig:
     def validate(self) -> None:
         if self.lambda_transition < 0:
             raise ValueError("lambda_transition must be non-negative")
+        if self.ntp_pass_weights is not None:
+            self.ntp_pass_weights = [
+                float(weight) for weight in self.ntp_pass_weights
+            ]
+            if any(
+                not math.isfinite(weight) or weight < 0
+                for weight in self.ntp_pass_weights
+            ):
+                raise ValueError(
+                    "ntp_pass_weights must contain finite non-negative values"
+                )
+            if sum(self.ntp_pass_weights) <= 0:
+                raise ValueError("ntp_pass_weights must have positive sum")
         if self.memory_horizon != 1:
             raise ValueError("only memory_horizon=1 is implemented")
         if self.dynamics_projection_factor <= 0:
@@ -169,6 +196,15 @@ class ExperimentConfig:
         self.model.validate()
         self.data.validate()
         self.objective.validate()
+        if self.objective.ntp_pass_weights is not None:
+            if self.model.variant == "transformer_ntp":
+                raise ValueError(
+                    "ntp_pass_weights are only valid for memory-tape variants"
+                )
+            if len(self.objective.ntp_pass_weights) != self.model.n_pass:
+                raise ValueError(
+                    "ntp_pass_weights must have one entry per MemoryTape pass"
+                )
         self.training.validate()
         self.evaluation.validate()
 
@@ -203,9 +239,10 @@ class ExperimentConfig:
 
 
 def transition_target_for_variant(variant: str) -> str | None:
+    variant = canonicalize_variant(variant)
     if variant == "memory_tape_nmp":
         return "memory"
-    if variant == "memory_tape_hidden_transition":
+    if variant == "memory_tape_nextlat_no_kl":
         return "hidden"
     return None
 

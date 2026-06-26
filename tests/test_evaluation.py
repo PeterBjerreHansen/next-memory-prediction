@@ -41,7 +41,7 @@ def test_validation_nll_is_weighted_by_valid_target_tokens():
     config = SimpleNamespace(
         model=SimpleNamespace(variant="transformer_ntp"),
         training=SimpleNamespace(precision="float32"),
-        objective=SimpleNamespace(lambda_transition=1.0),
+        objective=SimpleNamespace(lambda_transition=1.0, ntp_pass_weights=None),
     )
     tokenizer = SimpleNamespace(pad_id=0, eos_id=1)
 
@@ -100,7 +100,7 @@ def test_validation_transition_loss_is_weighted_by_valid_transitions():
     config = SimpleNamespace(
         model=SimpleNamespace(variant="memory_tape_nmp"),
         training=SimpleNamespace(precision="float32"),
-        objective=SimpleNamespace(lambda_transition=1.0),
+        objective=SimpleNamespace(lambda_transition=1.0, ntp_pass_weights=None),
     )
     tokenizer = SimpleNamespace(pad_id=0, eos_id=1)
     batch_losses = []

@@ -13,7 +13,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from .artifacts import artifacts_for, read_jsonl, write_json
-from .config import TRANSITION_VARIANTS, load_config, transition_target_for_variant
+from .config import (
+    TRANSITION_VARIANTS,
+    canonicalize_variant,
+    load_config,
+    transition_target_for_variant,
+)
 
 
 ROUND1_SEEDS = (0, 1, 2)
@@ -93,7 +98,14 @@ def load_selected_lambdas(path: str | Path) -> dict[str, float]:
     with Path(path).open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
     values = payload.get("selected_lambdas", payload)
-    return {variant: float(values[variant]) for variant in TRANSITION_VARIANTS}
+    canonical_values = {
+        canonicalize_variant(variant): float(value)
+        for variant, value in values.items()
+    }
+    return {
+        variant: float(canonical_values[variant])
+        for variant in TRANSITION_VARIANTS
+    }
 
 
 def _require_run_artifacts(run_dir: Path) -> None:
@@ -198,6 +210,7 @@ def load_run_record(
         "final_pass_nll": float(evaluation_loss["final_pass_nll"]),
         "perplexity": float(evaluation_loss["perplexity"]),
         "pass_nlls": list(map(float, evaluation_loss["pass_nlls"])),
+        "ntp_pass_weights": evaluation_loss.get("ntp_pass_weights"),
         "transition_prediction_loss": (
             None if transition_loss is None else float(transition_loss)
         ),
@@ -295,6 +308,7 @@ def summarize_conditions(
             "variant": variant,
             "lambda_transition": lambda_transition,
             "transition_target": transition_target_for_variant(variant),
+            "ntp_pass_weights": condition[0].get("ntp_pass_weights"),
             "seeds": sorted(record["seed"] for record in condition),
         }
         for field in scalar_fields:
@@ -378,14 +392,10 @@ def paired_comparisons(
     comparisons = (
         ("architecture", "transformer_ntp", "memory_tape_ntp"),
         ("memory_transition", "memory_tape_ntp", "memory_tape_nmp"),
-        (
-            "hidden_transition",
-            "memory_tape_ntp",
-            "memory_tape_hidden_transition",
-        ),
+        ("nextlat_no_kl", "memory_tape_ntp", "memory_tape_nextlat_no_kl"),
         (
             "explicit_memory_vs_hidden",
-            "memory_tape_hidden_transition",
+            "memory_tape_nextlat_no_kl",
             "memory_tape_nmp",
         ),
     )
@@ -494,8 +504,8 @@ def write_summary_markdown(
             "",
             "## Conditions",
             "",
-            "| Variant | λ | Final-pass NLL | Perplexity | Transition loss |",
-            "|---|---:|---:|---:|---:|",
+            "| Variant | λ | NTP weights | Final-pass NLL | Perplexity | Transition loss |",
+            "|---|---:|---|---:|---:|---:|",
         ]
     )
     for row in condition_summary:
@@ -510,8 +520,14 @@ def write_summary_markdown(
             if transition is None
             else f"{transition['mean']:.4f} ± {transition['std']:.4f}"
         )
+        weights = row.get("ntp_pass_weights")
+        weights_text = (
+            "—"
+            if weights is None
+            else ", ".join(f"{float(weight):g}" for weight in weights)
+        )
         lines.append(
-            f"| `{row['variant']}` | {lambda_text} | "
+            f"| `{row['variant']}` | {lambda_text} | {weights_text} | "
             f"{row['final_pass_nll']['mean']:.4f} ± "
             f"{row['final_pass_nll']['std']:.4f} | "
             f"{row['perplexity']['mean']:.3f} ± "

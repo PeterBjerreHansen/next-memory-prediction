@@ -61,6 +61,7 @@ def evaluate_batches(
                 eos_token_id=tokenizer.eos_id,
                 predictor=predictor,
                 lambda_transition=config.objective.lambda_transition,
+                ntp_pass_weights=config.objective.ntp_pass_weights,
             )
         metrics = losses.detached_metrics()
         batch_ntp_tokens = int(
@@ -103,6 +104,7 @@ def evaluate_batches(
         "pass_nlls": [
             value / ntp_token_count for value in pass_totals or []
         ],
+        "ntp_pass_weights": metrics["ntp_pass_weights"],
         "ntp_tokens": ntp_token_count,
     }
     result["perplexity"] = safe_perplexity(result["final_pass_nll"])

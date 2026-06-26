@@ -123,7 +123,7 @@ def test_legacy_lambda_memory_cli_alias(tmp_path):
     args = parse_args(
         [
             "--config",
-            "configs/smoke.yaml",
+            "configs/development.yaml",
             "--run-dir",
             str(tmp_path / "run"),
             "--variant",
@@ -135,3 +135,59 @@ def test_legacy_lambda_memory_cli_alias(tmp_path):
     config, _ = resolve_config(args)
     assert config.objective.lambda_transition == 0.3
     assert "lambda_memory" not in config.to_dict()["objective"]
+
+
+def test_legacy_hidden_transition_variant_alias_resolves_canonically():
+    config = ExperimentConfig.from_dict(
+        {
+            "name": "legacy-variant",
+            "seed": 0,
+            "model": {
+                "variant": "memory_tape_hidden_transition",
+                "block_size": 8,
+                "n_layer": 1,
+                "n_head": 1,
+                "n_embd": 8,
+                "n_pass": 2,
+            },
+            "training": {"train_steps": 1, "micro_batch_size": 1},
+        }
+    )
+    assert config.model.variant == "memory_tape_nextlat_no_kl"
+
+
+def test_ntp_pass_weights_validate_against_memory_tape_pass_count():
+    config = ExperimentConfig.from_dict(
+        {
+            "name": "weighted",
+            "seed": 0,
+            "model": {
+                "variant": "memory_tape_ntp",
+                "block_size": 8,
+                "n_layer": 1,
+                "n_head": 1,
+                "n_embd": 8,
+                "n_pass": 4,
+            },
+            "objective": {"ntp_pass_weights": [0, 0, 0.5, 0.5]},
+            "training": {"train_steps": 1, "micro_batch_size": 1},
+        }
+    )
+    assert config.objective.ntp_pass_weights == [0.0, 0.0, 0.5, 0.5]
+
+
+def test_ntp_pass_weights_cli_parses_json_list(tmp_path):
+    args = parse_args(
+        [
+            "--config",
+            "configs/development.yaml",
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--variant",
+            "memory_tape_ntp",
+            "--ntp-pass-weights",
+            "[0.0, 0.0, 0.5, 0.5]",
+        ]
+    )
+    config, _ = resolve_config(args)
+    assert config.objective.ntp_pass_weights == [0.0, 0.0, 0.5, 0.5]

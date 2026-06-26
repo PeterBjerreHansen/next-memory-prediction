@@ -97,6 +97,7 @@ def train_experiment(
                 config.model.variant
             ),
             "lambda_transition": config.objective.lambda_transition,
+            "ntp_pass_weights": config.objective.ntp_pass_weights,
             "device": str(device),
             "effective_batch_size": config.training.effective_batch_size,
             "parameters": parameter_counts,
@@ -138,6 +139,7 @@ def train_experiment(
                     eos_token_id=tokenizer.eos_id,
                     predictor=runtime_predictor,
                     lambda_transition=config.objective.lambda_transition,
+                    ntp_pass_weights=config.objective.ntp_pass_weights,
                 )
                 scaled_loss = (
                     losses.total / config.training.gradient_accumulation_steps

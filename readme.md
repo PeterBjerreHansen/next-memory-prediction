@@ -34,10 +34,10 @@ Copied-code, tokenizer, and dataset provenance is pinned in
 ## Round 1 conditions
 
 1. `transformer_ntp`: causal Transformer with next-token prediction.
-2. `memory_tape_ntp`: MemoryTape Transformer with equal NTP loss on every pass.
+2. `memory_tape_ntp`: MemoryTape Transformer with (pass-weighted) NTP loss.
 3. `memory_tape_nmp`: the same MemoryTape model with a final-pass memory
    transition objective.
-4. `memory_tape_hidden_transition`: the same MemoryTape model with a final-pass
+4. `memory_tape_nextlat_no_kl`: the same MemoryTape model with a final-pass
    hidden-state transition objective.
 
 Conditions 2–4 have identical model architecture and initialization under a
@@ -70,9 +70,14 @@ L_\mathrm{transition}
 For \(K\) MemoryTape passes:
 
 ```math
-L = \frac{1}{K}\sum_{k=1}^K L_\mathrm{NTP}^{(k)}
+L = \sum_{k=1}^K w_k L_\mathrm{NTP}^{(k)}
     + \lambda_\mathrm{transition}L_\mathrm{transition}.
 ```
+
+By default, \(w_k = 1/K\). MemoryTape runs can override this with
+`objective.ntp_pass_weights` or the CLI flag `--ntp-pass-weights`, for example
+`[0.0, 0.0, 0.5, 0.5]` for a 4-pass model. Supplied weights are normalized
+internally.
 
 The auxiliary predictor is training-only. Best checkpoints and transition
 weights are selected solely by final-pass validation NLL. Validation metrics
@@ -92,14 +97,15 @@ All variants use the same scale preset:
 ```bash
 python -m nmp.cli.train \
   --config configs/smoke.yaml \
-  --variant memory_tape_hidden_transition \
+  --variant memory_tape_nextlat_no_kl \
   --lambda-transition 1.0 \
-  --run-dir runs/smoke/memory_tape_hidden_transition
+  --run-dir runs/smoke/memory_tape_nextlat_no_kl
 ```
 
 The legacy `--lambda-memory` flag and `objective.lambda_memory` configuration
 field remain accepted, but resolved configurations always use
-`lambda_transition`.
+`lambda_transition`. The old variant name `memory_tape_hidden_transition` is
+also accepted as a compatibility alias for `memory_tape_nextlat_no_kl`.
 
 For offline work, provide line-delimited local story files:
 
@@ -140,6 +146,18 @@ Run and summarize it with:
 
 ```bash
 bash scripts/run_development_matrix.sh runs
+```
+
+To do a quick single-seed dry run of the launcher without training:
+
+```bash
+bash scripts/run_development_matrix.sh runs --seeds 0 --dry-run
+```
+
+To train MemoryTape runs with later-pass NTP weighting:
+
+```bash
+bash scripts/run_development_matrix.sh runs --ntp-pass-weights "[0, 0, 0.5, 0.5]"
 ```
 
 This selects a transition weight separately for conditions 3 and 4 using the

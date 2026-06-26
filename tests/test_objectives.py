@@ -84,7 +84,7 @@ def test_nmp_backward_reaches_model_memory_and_embedding_parameters():
     assert predictor.mlp[0].weight.grad.abs().sum() > 0
 
 
-def test_hidden_transition_uses_final_pass_hidden_states():
+def test_nextlat_no_kl_uses_final_pass_hidden_states():
     model = make_model()
     tokens = torch.tensor([[2, 3, 4, 1, 0]])
     output = model(tokens)
@@ -100,7 +100,7 @@ def test_hidden_transition_uses_final_pass_hidden_states():
 
     predictor = RecordingPredictor()
     losses = compute_loss(
-        variant="memory_tape_hidden_transition",
+        variant="memory_tape_nextlat_no_kl",
         model=model,
         output=output,
         tokens=tokens,
@@ -140,7 +140,25 @@ def test_memory_transition_uses_final_pass_memory_states():
     assert torch.equal(predictor.seen, output.memory_states[:, :-1])
 
 
-def test_hidden_transition_detaches_target_and_reaches_current_and_embedding():
+def test_memory_tape_ntp_pass_weights_are_normalized_and_applied():
+    torch.manual_seed(31)
+    model = make_model()
+    tokens = torch.tensor([[2, 3, 4, 1, 0]])
+    output = model(tokens)
+    losses = compute_loss(
+        variant="memory_tape_ntp",
+        model=model,
+        output=output,
+        tokens=tokens,
+        pad_token_id=0,
+        eos_token_id=1,
+        ntp_pass_weights=[0.0, 2.0],
+    )
+    assert losses.ntp_pass_weights == (0.0, 1.0)
+    assert torch.equal(losses.weighted_ntp, losses.pass_nlls[-1])
+
+
+def test_nextlat_no_kl_detaches_target_and_reaches_current_and_embedding():
     torch.manual_seed(21)
     model = make_model()
     predictor = LatentTransitionPredictor(8)
@@ -173,7 +191,7 @@ def test_memory_variants_share_model_initialization_and_predictor_shape(
     for variant in (
         "memory_tape_ntp",
         "memory_tape_nmp",
-        "memory_tape_hidden_transition",
+        "memory_tape_nextlat_no_kl",
     ):
         torch.manual_seed(77)
         built[variant] = build_model(
@@ -181,15 +199,15 @@ def test_memory_variants_share_model_initialization_and_predictor_shape(
             vocab_size=19,
         )
     baseline_state = built["memory_tape_ntp"][0].state_dict()
-    for variant in ("memory_tape_nmp", "memory_tape_hidden_transition"):
+    for variant in ("memory_tape_nmp", "memory_tape_nextlat_no_kl"):
         for name, value in baseline_state.items():
             assert torch.equal(value, built[variant][0].state_dict()[name])
     memory_predictor = built["memory_tape_nmp"][1]
-    hidden_predictor = built["memory_tape_hidden_transition"][1]
+    hidden_predictor = built["memory_tape_nextlat_no_kl"][1]
     for name, value in memory_predictor.state_dict().items():
         assert torch.equal(value, hidden_predictor.state_dict()[name])
     assert count_parameters(*built["memory_tape_nmp"])["training_only"] == (
-        count_parameters(*built["memory_tape_hidden_transition"])[
+        count_parameters(*built["memory_tape_nextlat_no_kl"])[
             "training_only"
         ]
     )
@@ -210,7 +228,7 @@ def test_lambda_zero_reproduces_memory_tape_ntp_total():
         pad_token_id=0,
         eos_token_id=1,
     )
-    for variant in ("memory_tape_nmp", "memory_tape_hidden_transition"):
+    for variant in ("memory_tape_nmp", "memory_tape_nextlat_no_kl"):
         transition_zero = compute_loss(
             variant=variant,
             model=model,

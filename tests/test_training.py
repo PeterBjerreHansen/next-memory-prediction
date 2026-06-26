@@ -13,7 +13,7 @@ from nmp.training import train_experiment
 
 @pytest.mark.parametrize(
     "variant",
-    ["memory_tape_nmp", "memory_tape_hidden_transition"],
+    ["memory_tape_nmp", "memory_tape_nextlat_no_kl"],
 )
 def test_checkpoint_resume_is_exact(
     variant,
