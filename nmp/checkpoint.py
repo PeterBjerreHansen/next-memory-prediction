@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import random
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,28 @@ def load_checkpoint(path: str | Path, *, map_location="cpu") -> dict[str, Any]:
     if path.is_dir():
         path = path / "latest.pt"
     return _torch_load(path, map_location=map_location)
+
+
+def migrate_checkpoint_config(payload: dict[str, Any]) -> dict[str, Any]:
+    config = copy.deepcopy(payload)
+    objective = dict(config.get("objective", {}))
+    objective.pop("memory_horizon", None)
+    legacy_lambda = objective.pop("lambda_memory", None)
+    if legacy_lambda is not None:
+        if "lambda_transition" not in objective:
+            objective["lambda_transition"] = legacy_lambda
+        elif float(legacy_lambda) != float(objective["lambda_transition"]):
+            raise ValueError(
+                "checkpoint objective lambda_memory and lambda_transition disagree"
+            )
+    config["objective"] = objective
+    return config
+
+
+def config_from_checkpoint(checkpoint: dict[str, Any]) -> ExperimentConfig:
+    return ExperimentConfig.from_dict(
+        migrate_checkpoint_config(checkpoint["config"])
+    )
 
 
 def restore_checkpoint(

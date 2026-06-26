@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from nmp.checkpoint import load_checkpoint
+from nmp.checkpoint import config_from_checkpoint, load_checkpoint
 from nmp.config import (
     ACCEPTED_VARIANTS,
     ExperimentConfig,
@@ -77,7 +77,7 @@ def resolve_config(args) -> tuple[ExperimentConfig, Path]:
     if args.resume_from is not None:
         validate_resume_args(args)
         checkpoint = load_checkpoint(args.resume_from)
-        config = ExperimentConfig.from_dict(checkpoint["config"])
+        config = config_from_checkpoint(checkpoint)
         run_dir = (
             args.resume_from if args.resume_from.is_dir() else args.resume_from.parent
         )

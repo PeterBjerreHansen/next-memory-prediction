@@ -7,7 +7,7 @@ from typing import Any
 import torch
 
 from .artifacts import append_jsonl, artifacts_for, write_json
-from .checkpoint import load_checkpoint, restore_checkpoint
+from .checkpoint import config_from_checkpoint, load_checkpoint, restore_checkpoint
 from .config import (
     ExperimentConfig,
     transition_target_for_variant,
@@ -277,7 +277,7 @@ def load_run(
     if not checkpoint_path.exists():
         checkpoint_path = artifacts.latest_checkpoint
     checkpoint = load_checkpoint(checkpoint_path, map_location="cpu")
-    config = ExperimentConfig.from_dict(checkpoint["config"])
+    config = config_from_checkpoint(checkpoint)
     if device_override is not None:
         config.training.device = device_override
     device = resolve_device(config.training.device)
