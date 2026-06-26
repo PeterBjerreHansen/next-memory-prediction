@@ -5,7 +5,10 @@ The active transformer and memory-tape implementation is adapted from:
 - Repository: `https://github.com/PeterBjerreHansen/multi-pass-transformer-training`
 - Commit: `e76089399d28c5a5a7fac6471455e5fa7f857225`
 - Copied components: transformer primitives, causal transformer, multi-pass
-  recurrence, memory-tape cross-attention, memory gates, and generation modes.
+  recurrence, memory-tape cross-attention, scalar memory gating, and generation
+  modes.
+- Deliberate local deletions: non-scalar memory gate modes, symbolic-task code,
+  unrelated upstream architectures, and legacy objective compatibility aliases.
 
 The vendored 1,000-token TinyStories tokenizer comes from:
 
@@ -21,6 +24,10 @@ The default dataset is:
 - Revision: `0397e27157956705a0260709da3095bb9c43d6a7`
 - License declared by the dataset card: CDLA-Sharing-1.0
 
-Local extensions include structured outputs, padding-aware objectives,
-memory- and hidden-state transition objectives, experiment configuration,
-checkpointing, TinyStories loading, diagnostics, probing, and reporting.
+Local extensions include structured outputs, configurable MemoryTape NTP pass
+weights, padding-aware objectives, memory- and hidden-state transition
+objectives, experiment configuration, checkpointing, TinyStories loading,
+diagnostics, probing, and reporting.
+
+Research-paper references are listed in `documents/references.md`; paper PDFs
+are intentionally not committed.

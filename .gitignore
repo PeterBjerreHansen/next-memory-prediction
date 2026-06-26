@@ -19,4 +19,4 @@ checkpoints/
 *.pt
 *.pth
 *.ckpt
-
+documents/*.pdf

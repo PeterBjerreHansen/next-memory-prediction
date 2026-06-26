@@ -27,8 +27,8 @@ therefore separates the effect of the MemoryTape architecture from generic
 latent-transition regularization and transition regularization applied
 specifically to projected memories.
 
-Background material and working notes live in [`documents/`](documents/).
-Copied-code, tokenizer, and dataset provenance is pinned in
+Background material, paper references, and working notes live in
+[`documents/`](documents/). Copied-code, tokenizer, and dataset provenance is pinned in
 [`PROVENANCE.md`](PROVENANCE.md).
 
 ## Round 1 conditions
