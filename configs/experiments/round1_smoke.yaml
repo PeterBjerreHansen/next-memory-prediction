@@ -1,0 +1,37 @@
+name: round1_smoke
+base_config: configs/scales/smoke.yaml
+runs_root: runs
+
+selection:
+  metric: final_pass_nll
+  mode: min
+  select_lambda_per_variant: true
+
+shared_overrides:
+  objective:
+    ntp_pass_weights: [0.0, 1.0]
+
+seeds: [0]
+
+conditions:
+  - name: transformer_ntp
+    variant: transformer_ntp
+    lambda_transition: null
+
+  - name: memory_tape_ntp
+    variant: memory_tape_ntp
+    lambda_transition: null
+
+  - name: memory_tape_nmp
+    variant: memory_tape_nmp
+    lambda_transition: [1.0]
+
+  - name: memory_tape_hidden_transition
+    variant: memory_tape_hidden_transition
+    lambda_transition: [1.0]
+
+post_run:
+  evaluate: true
+  probe: true
+  plot: true
+  summarize: true

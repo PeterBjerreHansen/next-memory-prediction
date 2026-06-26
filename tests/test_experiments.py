@@ -5,11 +5,12 @@ from pathlib import Path
 
 from nmp.artifacts import append_jsonl, artifacts_for, write_json
 from nmp.config import ExperimentConfig, save_config
-from nmp.experiments import (
-    expected_run_specs,
-    run_directory,
-    summarize_round1,
+from nmp.experiment_plan import (
+    expand_plan,
+    load_experiment_plan,
+    write_expanded_runs,
 )
+from nmp.experiments import summarize_experiment
 
 
 def _synthetic_score(variant: str, lambda_transition: float | None, seed: int):
@@ -164,9 +165,14 @@ def _write_synthetic_run(
 
 def test_development_summary_selects_mean_best_checkpoint_nll(tmp_path: Path):
     runs_root = tmp_path / "runs"
-    for spec in expected_run_specs("development"):
+    plan = load_experiment_plan("configs/experiments/round1_development.yaml")
+    expanded = expand_plan(plan, runs_root=runs_root)
+    expanded_path = tmp_path / "expanded_runs.jsonl"
+    write_expanded_runs(expanded_path, expanded)
+    for run in expanded:
+        spec = run.spec
         _write_synthetic_run(
-            run_directory(runs_root, "development", spec),
+            spec.run_dir,
             variant=spec.variant,
             seed=spec.seed,
             lambda_transition=spec.lambda_transition,
@@ -178,9 +184,8 @@ def test_development_summary_selects_mean_best_checkpoint_nll(tmp_path: Path):
         )
 
     output_dir = tmp_path / "summary"
-    result = summarize_round1(
-        runs_root=runs_root,
-        scale="development",
+    result = summarize_experiment(
+        expanded_runs=expanded_path,
         output_dir=output_dir,
     )
 
@@ -211,11 +216,15 @@ def test_development_summary_selects_mean_best_checkpoint_nll(tmp_path: Path):
 
 
 def test_reference_manifest_has_twelve_runs():
-    specs = expected_run_specs(
-        "reference",
+    plan = load_experiment_plan(
+        "configs/experiments/round1_reference_template.yaml"
+    )
+    expanded = expand_plan(
+        plan,
+        runs_root="runs",
         selected_lambdas={
             "memory_tape_nmp": 0.3,
             "memory_tape_hidden_transition": 1.0,
         },
     )
-    assert len(specs) == 12
+    assert len(expanded) == 12

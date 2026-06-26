@@ -1,0 +1,38 @@
+name: round1_reference
+base_config: configs/scales/reference.yaml
+runs_root: runs
+selection_file: round1_development/summary/selected_lambdas.json
+
+selection:
+  metric: final_pass_nll
+  mode: min
+  select_lambda_per_variant: false
+
+shared_overrides:
+  objective:
+    ntp_pass_weights: [0.0, 0.0, 0.5, 0.5]
+
+seeds: [0, 1, 2]
+
+conditions:
+  - name: transformer_ntp
+    variant: transformer_ntp
+    lambda_transition: null
+
+  - name: memory_tape_ntp
+    variant: memory_tape_ntp
+    lambda_transition: null
+
+  - name: memory_tape_nmp
+    variant: memory_tape_nmp
+    lambda_transition: from_selection
+
+  - name: memory_tape_hidden_transition
+    variant: memory_tape_hidden_transition
+    lambda_transition: from_selection
+
+post_run:
+  evaluate: true
+  probe: true
+  plot: true
+  summarize: true

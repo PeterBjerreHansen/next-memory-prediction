@@ -105,7 +105,7 @@ All variants use the same scale preset:
 
 ```bash
 python -m nmp.cli.train \
-  --config configs/smoke.yaml \
+  --config configs/scales/smoke.yaml \
   --variant memory_tape_hidden_transition \
   --lambda-transition 1.0 \
   --run-dir runs/smoke/memory_tape_hidden_transition
@@ -120,7 +120,7 @@ For offline work, provide line-delimited local story files:
 
 ```bash
 python -m nmp.cli.train \
-  --config configs/smoke.yaml \
+  --config configs/scales/smoke.yaml \
   --variant memory_tape_nmp \
   --train-file tests/fixtures/tinystories_train.txt \
   --val-file tests/fixtures/tinystories_val.txt \
@@ -144,6 +144,13 @@ MemoryTape generation supports exact `recompute` inference and recurrent
 
 ## Experiment matrices
 
+Round 1 matrices are defined by explicit experiment manifests under
+`configs/experiments/`. Scale/base run presets live under `configs/scales/`.
+The manifest is the source of truth for variants, seeds, lambda grids, NTP
+pass weights, selection metric, and post-run diagnostics. Each launcher copies
+the manifest into the experiment directory and writes `expanded_runs.jsonl`
+with the exact concrete runs.
+
 The development matrix contains 30 runs:
 
 - Seeds `0`, `1`, and `2`.
@@ -163,11 +170,9 @@ To do a quick single-seed dry run of the launcher without training:
 bash scripts/run_development_matrix.sh runs --seeds 0 --dry-run
 ```
 
-To train MemoryTape runs with later-pass NTP weighting:
-
-```bash
-bash scripts/run_development_matrix.sh runs --ntp-pass-weights "[0, 0, 0.5, 0.5]"
-```
+The shipped Round 1 development and reference manifests set MemoryTape NTP
+pass weights to `[0.0, 0.0, 0.5, 0.5]`. Edit or copy the manifest to run a
+different pass-weight ablation.
 
 This selects a transition weight separately for conditions 3 and 4 using the
 lowest mean best-checkpoint final-pass validation NLL across seeds.
@@ -180,20 +185,30 @@ bash scripts/run_reference_matrix.sh runs
 ```
 
 The reference launcher consumes
-`runs/development/summary/selected_lambdas.json`. Both launchers resume
-existing checkpoints and train probes before generating their summaries.
+`runs/round1_development/summary/selected_lambdas.json`. Both launchers resume
+existing checkpoints, train probes, and generate summaries.
+
+For serious reference runs, freeze the selected development weights into an
+explicit reference manifest:
+
+```bash
+python -m nmp.cli.freeze_reference_experiment \
+  --development-summary runs/round1_development/summary \
+  --template configs/experiments/round1_reference_template.yaml \
+  --output configs/experiments/round1_reference_frozen.yaml
+```
 
 The summary command can also be run directly:
 
 ```bash
 python -m nmp.cli.summarize \
-  --runs-root runs \
-  --scale development \
-  --output-dir runs/development/summary
+  --experiment configs/experiments/round1_development.yaml \
+  --runs-root runs
 ```
 
-Each summary verifies the complete expected matrix and emits JSON, CSV,
-Markdown, selected weights, and a comparison plot. Reports include individual
+Each summary verifies the completed runs against `expanded_runs.jsonl` and
+emits JSON, CSV, Markdown, selected weights, and a comparison plot. Reports
+include individual
 seeds, mean and standard deviation, paired-seed deltas, token and transition
 losses, parameter counts, throughput, generation agreement, representation
 diagnostics, and hidden/memory probes. These are validation results; the same

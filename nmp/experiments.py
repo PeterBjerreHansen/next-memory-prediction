@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import json
 import statistics
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -19,79 +18,11 @@ from .config import (
     load_config,
     transition_target_for_variant,
 )
+from .experiment_plan import ExpandedRunSpec, load_expanded_run_specs
 
 
-ROUND1_SEEDS = (0, 1, 2)
-ROUND1_LAMBDAS = (0.1, 0.3, 1.0, 3.0)
 BASELINE_VARIANTS = ("transformer_ntp", "memory_tape_ntp")
-ROUND1_VARIANTS = (*BASELINE_VARIANTS, *TRANSITION_VARIANTS)
-
-
-@dataclass(frozen=True)
-class RunSpec:
-    variant: str
-    seed: int
-    lambda_transition: float | None = None
-
-
-def format_lambda(value: float) -> str:
-    return str(float(value))
-
-
-def run_directory(
-    runs_root: str | Path,
-    scale: str,
-    spec: RunSpec,
-) -> Path:
-    path = Path(runs_root) / scale / spec.variant
-    if spec.lambda_transition is not None:
-        path /= f"lambda_{format_lambda(spec.lambda_transition)}"
-    return path / f"seed_{spec.seed}"
-
-
-def expected_run_specs(
-    scale: str,
-    *,
-    selected_lambdas: dict[str, float] | None = None,
-) -> list[RunSpec]:
-    if scale not in {"development", "reference"}:
-        raise ValueError("scale must be development or reference")
-    specs = [
-        RunSpec(variant=variant, seed=seed)
-        for variant in BASELINE_VARIANTS
-        for seed in ROUND1_SEEDS
-    ]
-    if scale == "development":
-        specs.extend(
-            RunSpec(
-                variant=variant,
-                seed=seed,
-                lambda_transition=lambda_transition,
-            )
-            for variant in TRANSITION_VARIANTS
-            for lambda_transition in ROUND1_LAMBDAS
-            for seed in ROUND1_SEEDS
-        )
-        return specs
-    if selected_lambdas is None:
-        raise ValueError("reference summaries require selected transition weights")
-    missing = [
-        variant for variant in TRANSITION_VARIANTS if variant not in selected_lambdas
-    ]
-    if missing:
-        raise ValueError(
-            "selection file is missing variants: " + ", ".join(missing)
-        )
-    specs.extend(
-        RunSpec(
-            variant=variant,
-            seed=seed,
-            lambda_transition=float(selected_lambdas[variant]),
-        )
-        for variant in TRANSITION_VARIANTS
-        for seed in ROUND1_SEEDS
-    )
-    return specs
+DEFAULT_VARIANT_ORDER = (*BASELINE_VARIANTS, *TRANSITION_VARIANTS)
 
 
 def load_selected_lambdas(path: str | Path) -> dict[str, float]:
@@ -106,6 +37,21 @@ def load_selected_lambdas(path: str | Path) -> dict[str, float]:
         variant: float(canonical_values[variant])
         for variant in TRANSITION_VARIANTS
     }
+
+
+def _variant_sort_key(variant: str) -> tuple[int, str]:
+    if variant in DEFAULT_VARIANT_ORDER:
+        return DEFAULT_VARIANT_ORDER.index(variant), variant
+    return len(DEFAULT_VARIANT_ORDER), variant
+
+
+def _ordered_variant_sort_key(
+    variant: str,
+    variant_order: list[str] | None,
+) -> tuple[int, str]:
+    if variant_order is not None and variant in variant_order:
+        return variant_order.index(variant), variant
+    return _variant_sort_key(variant)
 
 
 def _require_run_artifacts(run_dir: Path) -> None:
@@ -160,13 +106,8 @@ def _metric_with_fallback(
     return fallback.get(key, default)
 
 
-def load_run_record(
-    run_dir: str | Path,
-    *,
-    scale: str,
-    spec: RunSpec,
-) -> dict[str, Any]:
-    run_dir = Path(run_dir)
+def load_run_record(spec: ExpandedRunSpec) -> dict[str, Any]:
+    run_dir = Path(spec.run_dir)
     _require_run_artifacts(run_dir)
     artifacts = artifacts_for(run_dir)
     config = load_config(artifacts.config_path)
@@ -225,14 +166,10 @@ def load_run_record(
         diagnostic_final_pass_nll = evaluation_loss.get("final_pass_nll")
 
     return {
-        "scale": scale,
+        "experiment": spec.experiment,
         "variant": spec.variant,
         "seed": spec.seed,
-        "lambda_transition": (
-            None
-            if spec.variant in BASELINE_VARIANTS
-            else float(config.objective.transition.lambda_transition)
-        ),
+        "lambda_transition": spec.lambda_transition,
         "transition_target": transition_target_for_variant(spec.variant),
         "run_dir": str(run_dir),
         "best_checkpoint_final_pass_nll": final_pass_nll,
@@ -281,24 +218,38 @@ def select_development_lambdas(
     records: list[dict[str, Any]],
 ) -> dict[str, float]:
     selected: dict[str, float] = {}
-    for variant in TRANSITION_VARIANTS:
+    variants = sorted(
+        {
+            record["variant"]
+            for record in records
+            if record["lambda_transition"] is not None
+        },
+        key=_variant_sort_key,
+    )
+    for variant in variants:
         candidates = []
-        for lambda_transition in ROUND1_LAMBDAS:
+        seed_sets = []
+        for lambda_transition in sorted(
+            {
+                float(record["lambda_transition"])
+                for record in records
+                if record["variant"] == variant
+                and record["lambda_transition"] is not None
+            }
+        ):
             rows = [
                 record
                 for record in records
                 if record["variant"] == variant
                 and record["lambda_transition"] == lambda_transition
             ]
-            if len(rows) != len(ROUND1_SEEDS):
-                raise ValueError(
-                    f"{variant} lambda={lambda_transition:g} has "
-                    f"{len(rows)} seeds, expected {len(ROUND1_SEEDS)}"
-                )
+            seed_sets.append({int(row["seed"]) for row in rows})
             mean_nll = statistics.mean(
                 row["best_checkpoint_final_pass_nll"] for row in rows
             )
             candidates.append((mean_nll, lambda_transition))
+        if len({tuple(sorted(seeds)) for seeds in seed_sets}) > 1:
+            raise ValueError(f"{variant} lambda candidates have unequal seeds")
         selected[variant] = min(candidates)[1]
     return selected
 
@@ -310,7 +261,8 @@ def selected_condition_records(
     return [
         record
         for record in records
-        if record["variant"] in BASELINE_VARIANTS
+        if record["lambda_transition"] is None
+        or record["variant"] not in selected_lambdas
         or record["lambda_transition"] == selected_lambdas[record["variant"]]
     ]
 
@@ -324,6 +276,8 @@ def _scalar_statistics(values: list[float]) -> dict[str, float]:
 
 def summarize_conditions(
     records: list[dict[str, Any]],
+    *,
+    variant_order: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, float | None], list[dict[str, Any]]] = {}
     for record in records:
@@ -346,7 +300,7 @@ def summarize_conditions(
     for (variant, lambda_transition), condition in sorted(
         grouped.items(),
         key=lambda item: (
-            ROUND1_VARIANTS.index(item[0][0]),
+            _ordered_variant_sort_key(item[0][0], variant_order),
             -1.0 if item[0][1] is None else item[0][1],
         ),
     ):
@@ -446,9 +400,21 @@ def paired_comparisons(
         ),
     )
     results = []
+    available_variants = {record["variant"] for record in conditions.values()}
     for name, source, target in comparisons:
+        if source not in available_variants or target not in available_variants:
+            continue
+        source_seeds = {
+            seed for variant, seed in conditions if variant == source
+        }
+        target_seeds = {
+            seed for variant, seed in conditions if variant == target
+        }
+        paired_seeds = sorted(source_seeds & target_seeds)
+        if not paired_seeds:
+            continue
         seed_rows = []
-        for seed in ROUND1_SEEDS:
+        for seed in paired_seeds:
             left = conditions[(source, seed)]
             right = conditions[(target, seed)]
             seed_rows.append(
@@ -518,7 +484,7 @@ def write_summary_markdown(
     probe_summary: list[dict[str, Any]],
 ) -> None:
     lines = [
-        f"# Round 1 {scale.title()} Summary",
+        f"# {scale.replace('_', ' ').title()} Summary",
         "",
         "Validation metrics are reported; no separate held-out test set is used.",
         "Primary loss columns use the checkpoint-selection validation estimate,",
@@ -528,8 +494,15 @@ def write_summary_markdown(
         "",
     ]
     for variant in TRANSITION_VARIANTS:
-        lines.append(f"- `{variant}`: `{selected_lambdas[variant]:g}`")
-    if scale == "development":
+        if variant in selected_lambdas:
+            lines.append(f"- `{variant}`: `{selected_lambdas[variant]:g}`")
+    lambdas_by_variant: dict[str, set[float]] = {}
+    for row in all_condition_summary:
+        if row["lambda_transition"] is not None:
+            lambdas_by_variant.setdefault(row["variant"], set()).add(
+                float(row["lambda_transition"])
+            )
+    if any(len(values) > 1 for values in lambdas_by_variant.values()):
         lines.extend(
             [
                 "",
@@ -723,44 +696,60 @@ def plot_comparison(
     plt.close(figure)
 
 
-def summarize_round1(
+def _variant_order_from_specs(specs: list[ExpandedRunSpec]) -> list[str]:
+    order: list[str] = []
+    for spec in specs:
+        if spec.variant not in order:
+            order.append(spec.variant)
+    return order
+
+
+def _selected_lambdas_from_expanded_records(
+    records: list[dict[str, Any]],
+) -> dict[str, float]:
+    by_variant: dict[str, set[float]] = {}
+    for record in records:
+        value = record["lambda_transition"]
+        if value is not None:
+            by_variant.setdefault(record["variant"], set()).add(float(value))
+    if any(len(values) > 1 for values in by_variant.values()):
+        return select_development_lambdas(records)
+    return {
+        variant: next(iter(values))
+        for variant, values in by_variant.items()
+        if values
+    }
+
+
+def summarize_experiment(
     *,
-    runs_root: str | Path,
-    scale: str,
+    expanded_runs: str | Path,
     output_dir: str | Path,
     selection_file: str | Path | None = None,
 ) -> dict[str, Any]:
-    if scale == "development":
-        selected_for_manifest = None
-    else:
-        if selection_file is None:
-            raise ValueError("reference summary requires --selection-file")
-        selected_for_manifest = load_selected_lambdas(selection_file)
-    specs = expected_run_specs(
-        scale,
-        selected_lambdas=selected_for_manifest,
-    )
-    records = [
-        load_run_record(
-            run_directory(runs_root, scale, spec),
-            scale=scale,
-            spec=spec,
-        )
-        for spec in specs
-    ]
-    selected_lambdas = (
-        select_development_lambdas(records)
-        if scale == "development"
-        else selected_for_manifest
-    )
-    assert selected_lambdas is not None
+    specs = load_expanded_run_specs(expanded_runs)
+    if not specs:
+        raise ValueError("expanded run manifest is empty")
+    records = [load_run_record(spec) for spec in specs]
+    selected_lambdas = _selected_lambdas_from_expanded_records(records)
+    if selection_file is not None and not selected_lambdas:
+        selected_lambdas = load_selected_lambdas(selection_file)
     selected_records = selected_condition_records(records, selected_lambdas)
-    all_condition_summary = summarize_conditions(records)
-    condition_summary = summarize_conditions(selected_records)
+    variant_order = _variant_order_from_specs(specs)
+    all_condition_summary = summarize_conditions(
+        records,
+        variant_order=variant_order,
+    )
+    condition_summary = summarize_conditions(
+        selected_records,
+        variant_order=variant_order,
+    )
     probe_summary = summarize_probes(selected_records)
     comparisons = paired_comparisons(records, selected_lambdas)
+    experiment_name = specs[0].experiment
     result = {
-        "scale": scale,
+        "experiment": experiment_name,
+        "expanded_runs": str(expanded_runs),
         "expected_runs": len(specs),
         "completed_runs": len(records),
         "selection_criterion": (
@@ -777,17 +766,18 @@ def summarize_round1(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "summary.json", result)
-    write_json(
-        output_dir / "selected_lambdas.json",
-        {
-            "selection_criterion": result["selection_criterion"],
-            "selected_lambdas": selected_lambdas,
-        },
-    )
+    if selected_lambdas:
+        write_json(
+            output_dir / "selected_lambdas.json",
+            {
+                "selection_criterion": result["selection_criterion"],
+                "selected_lambdas": selected_lambdas,
+            },
+        )
     write_records_csv(output_dir / "runs.csv", records)
     write_summary_markdown(
         output_dir / "summary.md",
-        scale=scale,
+        scale=experiment_name,
         selected_lambdas=selected_lambdas,
         all_condition_summary=all_condition_summary,
         condition_summary=condition_summary,

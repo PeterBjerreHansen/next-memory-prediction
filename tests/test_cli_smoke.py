@@ -27,7 +27,7 @@ def test_offline_smoke_workflow(variant, local_story_files, tmp_path: Path):
     train_main(
         [
             "--config",
-            "configs/smoke.yaml",
+            "configs/scales/smoke.yaml",
             "--variant",
             variant,
             "--run-dir",

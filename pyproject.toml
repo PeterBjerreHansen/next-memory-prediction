@@ -20,7 +20,8 @@ nmp-train = "nmp.cli.train:main"
 nmp-evaluate = "nmp.cli.evaluate:main"
 nmp-probe = "nmp.cli.probe:main"
 nmp-plot = "nmp.cli.plot:main"
-nmp-run-matrix = "nmp.cli.run_matrix:main"
+nmp-run-experiment = "nmp.cli.run_experiment:main"
+nmp-freeze-reference-experiment = "nmp.cli.freeze_reference_experiment:main"
 nmp-summarize = "nmp.cli.summarize:main"
 
 [build-system]

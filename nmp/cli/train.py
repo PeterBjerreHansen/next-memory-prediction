@@ -51,6 +51,8 @@ def parse_args(argv=None):
     )
     parser.add_argument("--train-file")
     parser.add_argument("--val-file")
+    parser.add_argument("--skip-evaluate", action="store_true")
+    parser.add_argument("--skip-plot", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -117,8 +119,10 @@ def main(argv=None):
         run_dir=run_dir,
         resume_from=args.resume_from,
     )
-    evaluate_run(run_dir, device_override=args.device)
-    plot_run(run_dir)
+    if not args.skip_evaluate:
+        evaluate_run(run_dir, device_override=args.device)
+    if not args.skip_plot:
+        plot_run(run_dir)
     print(run_dir.resolve())
 
 

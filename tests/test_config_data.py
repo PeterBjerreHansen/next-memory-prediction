@@ -93,8 +93,19 @@ def test_local_corpus_and_stream_state_are_reproducible(local_story_files):
 def test_all_shipped_configs_validate():
     from pathlib import Path
 
-    for path in Path("configs").glob("*.yaml"):
+    for path in Path("configs/scales").glob("*.yaml"):
         load_config(path)
+    from nmp.experiment_plan import expand_plan, load_experiment_plan
+
+    for path in Path("configs/experiments").glob("*.yaml"):
+        plan = load_experiment_plan(path)
+        selected_lambdas = None
+        if path.name == "round1_reference_template.yaml":
+            selected_lambdas = {
+                "memory_tape_nmp": 0.3,
+                "memory_tape_hidden_transition": 1.0,
+            }
+        assert expand_plan(plan, selected_lambdas=selected_lambdas)
 
 
 def test_legacy_nextlat_variant_alias_resolves_canonically():
@@ -172,7 +183,7 @@ def test_ntp_pass_weights_cli_parses_json_list(tmp_path):
     args = parse_args(
         [
             "--config",
-            "configs/development.yaml",
+            "configs/scales/development.yaml",
             "--run-dir",
             str(tmp_path / "run"),
             "--variant",
