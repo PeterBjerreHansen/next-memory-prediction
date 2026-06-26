@@ -109,26 +109,6 @@ def temporal_transition_prediction_loss(
     return (elementwise * weights).sum() / denominator
 
 
-def temporal_memory_prediction_loss(
-    model: MemoryTapeTransformer,
-    predictor: LatentTransitionPredictor,
-    memory_states: torch.Tensor,
-    tokens: torch.Tensor,
-    *,
-    eos_token_id: int,
-    pad_token_id: int,
-) -> torch.Tensor:
-    """Compatibility wrapper for the original memory-only objective."""
-    return temporal_transition_prediction_loss(
-        model,
-        predictor,
-        memory_states,
-        tokens,
-        eos_token_id=eos_token_id,
-        pad_token_id=pad_token_id,
-    )
-
-
 def compute_loss(
     *,
     variant: str,

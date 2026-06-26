@@ -552,8 +552,3 @@ class LatentTransitionPredictor(nn.Module):
 
     def get_num_params(self) -> int:
         return sum(parameter.numel() for parameter in self.parameters())
-
-
-# Public compatibility alias for checkpoints and downstream imports created
-# before the predictor was generalized beyond memory states.
-MemoryDynamicsPredictor = LatentTransitionPredictor

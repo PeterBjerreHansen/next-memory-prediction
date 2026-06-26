@@ -5,14 +5,12 @@ from torch.nn import functional as F
 
 from nmp.models import (
     LatentTransitionPredictor,
-    MemoryDynamicsPredictor,
     MemoryTapeConfig,
     MemoryTapeTransformer,
 )
 from nmp.objectives import (
     compute_loss,
     next_token_loss,
-    temporal_memory_prediction_loss,
     temporal_transition_prediction_loss,
 )
 
@@ -44,10 +42,10 @@ def test_next_token_loss_masks_padding_but_trains_eos():
 def test_memory_loss_detaches_target_and_masks_eos_and_padding():
     torch.manual_seed(4)
     model = make_model()
-    predictor = MemoryDynamicsPredictor(8)
+    predictor = LatentTransitionPredictor(8)
     memory = torch.randn(1, 4, 8, requires_grad=True)
     tokens = torch.tensor([[2, 3, 1, 0]])
-    loss = temporal_memory_prediction_loss(
+    loss = temporal_transition_prediction_loss(
         model,
         predictor,
         memory,
@@ -65,7 +63,7 @@ def test_memory_loss_detaches_target_and_masks_eos_and_padding():
 def test_nmp_backward_reaches_model_memory_and_embedding_parameters():
     torch.manual_seed(8)
     model = make_model()
-    predictor = MemoryDynamicsPredictor(8)
+    predictor = LatentTransitionPredictor(8)
     tokens = torch.tensor([[2, 3, 4, 1, 0], [5, 6, 7, 1, 0]])
     output = model(tokens)
     losses = compute_loss(
@@ -217,7 +215,7 @@ def test_memory_variants_share_model_initialization_and_predictor_shape(
 def test_lambda_zero_reproduces_memory_tape_ntp_total():
     torch.manual_seed(12)
     model = make_model()
-    predictor = MemoryDynamicsPredictor(8)
+    predictor = LatentTransitionPredictor(8)
     tokens = torch.tensor([[2, 3, 4, 1, 0]])
     output = model(tokens)
     ntp = compute_loss(

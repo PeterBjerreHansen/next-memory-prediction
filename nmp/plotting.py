@@ -11,10 +11,7 @@ from .artifacts import artifacts_for, read_jsonl
 
 
 def transition_loss_from_row(row: dict) -> float | None:
-    value = row.get("transition_prediction_loss")
-    if value is None:
-        value = row.get("memory_prediction_loss")
-    return value
+    return row.get("transition_prediction_loss")
 
 
 def plot_training(run_dir: str | Path) -> Path | None:

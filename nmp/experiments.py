@@ -202,8 +202,6 @@ def load_run_record(
     transition_loss = best_validation.get("transition_prediction_loss")
     if transition_loss is None:
         transition_loss = evaluation_loss.get("transition_prediction_loss")
-    if transition_loss is None:
-        transition_loss = evaluation_loss.get("memory_prediction_loss")
     parameters = evaluation.get("parameters", {})
     generation = evaluation.get("generation", {})
     final_pass_nll = float(best_validation["final_pass_nll"])

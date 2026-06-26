@@ -10,7 +10,6 @@ from nmp.experiments import (
     run_directory,
     summarize_round1,
 )
-from nmp.plotting import plot_training
 
 
 def _synthetic_score(variant: str, lambda_transition: float | None, seed: int):
@@ -219,17 +218,3 @@ def test_reference_manifest_has_twelve_runs():
     )
     assert len(specs) == 12
 
-
-def test_plotting_accepts_legacy_memory_prediction_metric(tmp_path: Path):
-    artifacts = artifacts_for(tmp_path / "legacy")
-    artifacts.plots_dir.mkdir(parents=True)
-    append_jsonl(
-        artifacts.metrics_path,
-        {
-            "event": "train",
-            "step": 1,
-            "final_pass_nll": 2.0,
-            "memory_prediction_loss": 0.5,
-        },
-    )
-    assert plot_training(artifacts.run_dir).exists()
