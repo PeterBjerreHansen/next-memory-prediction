@@ -40,7 +40,6 @@ def build_model(
             n_head=model_config.n_head,
             n_embd=model_config.n_embd,
             n_pass=model_config.n_pass,
-            memory_tape_gate=model_config.memory_tape_gate,
         )
     )
     predictor = (

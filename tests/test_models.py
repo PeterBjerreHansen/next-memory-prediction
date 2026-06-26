@@ -62,7 +62,6 @@ def test_first_pass_exactly_matches_trunk_matched_transformer():
     memory_config = MemoryTapeConfig(
         **base_config.to_dict(),
         n_pass=3,
-        memory_tape_gate="scalar",
     )
     torch.manual_seed(seed)
     baseline = CausalTransformer(base_config)
@@ -150,7 +149,6 @@ def test_scalar_gate_starts_at_point_two():
             n_head=1,
             n_embd=8,
             n_pass=2,
-            memory_tape_gate="scalar",
         )
     )
     stats = model.memory_gate_stats()

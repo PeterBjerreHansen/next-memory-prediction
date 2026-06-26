@@ -125,22 +125,11 @@ class TransformerConfig:
 @dataclass(kw_only=True)
 class MemoryTapeConfig(TransformerConfig):
     n_pass: int = 4
-    memory_tape_gate: str = "scalar"
 
     def __post_init__(self):
         super().__post_init__()
         if self.n_pass < 2:
             raise ValueError("n_pass must be at least 2")
-        self.memory_tape_gate = self.normalize_gate(self.memory_tape_gate)
-
-    @staticmethod
-    def normalize_gate(value) -> str:
-        if value is None:
-            return "none"
-        normalized = str(value).lower()
-        if normalized not in {"none", "tanh", "scalar"}:
-            raise ValueError("memory_tape_gate must be none, tanh, or scalar")
-        return normalized
 
     @classmethod
     def from_dict(cls, payload: dict) -> "MemoryTapeConfig":
@@ -274,20 +263,9 @@ class MemoryBlock(nn.Module):
         self.cross_attn = CausalCrossAttention(config)
         self.ln_2 = LayerNorm(config.n_embd)
         self.mlp = MLP(config)
-        self.memory_tape_gate = config.memory_tape_gate
-        self.memory_gate = (
-            None
-            if self.memory_tape_gate == "none"
-            else nn.Parameter(
-                torch.tensor(0.2 if self.memory_tape_gate == "scalar" else 0.0)
-            )
-        )
+        self.memory_gate = nn.Parameter(torch.tensor(0.2))
 
     def memory_gate_scale(self):
-        if self.memory_tape_gate == "none":
-            return 1.0
-        if self.memory_tape_gate == "tanh":
-            return torch.tanh(self.memory_gate)
         return self.memory_gate
 
     def forward(self, x: torch.Tensor, memory: torch.Tensor) -> torch.Tensor:
@@ -441,17 +419,14 @@ class MemoryTapeTransformer(nn.Module):
     def memory_gate_stats(self) -> dict[str, object] | None:
         values = []
         for block in self.transformer["h"]:
-            if block.memory_gate is not None:
-                raw = float(block.memory_gate.detach().cpu())
-                effective = float(
-                    torch.as_tensor(block.memory_gate_scale()).detach().cpu()
-                )
-                values.append((raw, effective))
-        if not values:
-            return None
+            raw = float(block.memory_gate.detach().cpu())
+            effective = float(
+                torch.as_tensor(block.memory_gate_scale()).detach().cpu()
+            )
+            values.append((raw, effective))
         effective_values = [item[1] for item in values]
         return {
-            "mode": self.config.memory_tape_gate,
+            "mode": "scalar",
             "raw": [item[0] for item in values],
             "effective": effective_values,
             "mean_abs_effective": sum(map(abs, effective_values)) / len(values),

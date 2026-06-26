@@ -56,8 +56,8 @@ class ModelConfig:
             raise ValueError("n_embd must be divisible by n_head")
         if self.variant != "transformer_ntp" and self.n_pass < 2:
             raise ValueError("memory-tape variants require n_pass >= 2")
-        if self.memory_tape_gate not in {"none", "tanh", "scalar"}:
-            raise ValueError("memory_tape_gate must be none, tanh, or scalar")
+        if self.memory_tape_gate != "scalar":
+            raise ValueError("memory_tape_gate is fixed to scalar")
 
 
 @dataclass(kw_only=True)

@@ -46,7 +46,6 @@ def make_config(
                 "n_head": 2,
                 "n_embd": 16,
                 "n_pass": 2,
-                "memory_tape_gate": "scalar",
             },
             "data": {
                 "source": "local",

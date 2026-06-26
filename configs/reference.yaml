@@ -7,7 +7,6 @@ model:
   n_head: 8
   n_embd: 768
   n_pass: 4
-  memory_tape_gate: scalar
 data:
   source: huggingface
 objective:
