@@ -41,7 +41,6 @@ def parse_args(argv=None):
         choices=ACCEPTED_VARIANTS,
     )
     parser.add_argument("--lambda-transition", type=float)
-    parser.add_argument("--lambda-memory", type=float)
     parser.add_argument(
         "--ntp-pass-weights",
         type=parse_ntp_pass_weights,
@@ -76,17 +75,8 @@ def resolve_config(args) -> tuple[ExperimentConfig, Path]:
     if args.variant is not None:
         config.model.variant = canonicalize_variant(args.variant)
         config.name = f"{config.name}-{config.model.variant}"
-    if args.lambda_transition is not None and args.lambda_memory is not None:
-        raise ValueError(
-            "--lambda-transition and legacy --lambda-memory are mutually exclusive"
-        )
-    lambda_transition = (
-        args.lambda_transition
-        if args.lambda_transition is not None
-        else args.lambda_memory
-    )
-    if lambda_transition is not None:
-        config.objective.lambda_transition = lambda_transition
+    if args.lambda_transition is not None:
+        config.objective.lambda_transition = args.lambda_transition
     if args.ntp_pass_weights is not None:
         config.objective.ntp_pass_weights = args.ntp_pass_weights
     if args.train_file is not None or args.val_file is not None:

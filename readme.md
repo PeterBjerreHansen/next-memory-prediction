@@ -102,10 +102,9 @@ python -m nmp.cli.train \
   --run-dir runs/smoke/memory_tape_hidden_transition
 ```
 
-The legacy `--lambda-memory` flag and `objective.lambda_memory` configuration
-field remain accepted, but resolved configurations always use
-`lambda_transition`. The old variant name `memory_tape_nextlat_no_kl` is also
-accepted as a compatibility alias for `memory_tape_hidden_transition`.
+Use `lambda_transition` for the auxiliary transition objective. The old variant
+name `memory_tape_nextlat_no_kl` is still accepted as a compatibility alias for
+`memory_tape_hidden_transition`.
 
 For offline work, provide line-delimited local story files:
 

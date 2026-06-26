@@ -55,7 +55,6 @@ def make_config(
             },
             "objective": {
                 "lambda_transition": 1.0,
-                "memory_horizon": 1,
                 "dynamics_projection_factor": 1.3,
             },
             "training": {

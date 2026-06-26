@@ -96,47 +96,6 @@ def test_all_shipped_configs_validate():
         load_config(path)
 
 
-def test_legacy_lambda_memory_loads_but_resolves_canonically():
-    config = ExperimentConfig.from_dict(
-        {
-            "name": "legacy",
-            "seed": 0,
-            "model": {
-                "variant": "memory_tape_nmp",
-                "block_size": 8,
-                "n_layer": 1,
-                "n_head": 1,
-                "n_embd": 8,
-                "n_pass": 2,
-            },
-            "objective": {"lambda_memory": 0.3},
-            "training": {"train_steps": 1, "micro_batch_size": 1},
-        }
-    )
-    assert config.objective.lambda_transition == 0.3
-    assert config.objective.lambda_memory == 0.3
-    assert "lambda_memory" not in config.to_dict()["objective"]
-    assert config.to_dict()["objective"]["lambda_transition"] == 0.3
-
-
-def test_legacy_lambda_memory_cli_alias(tmp_path):
-    args = parse_args(
-        [
-            "--config",
-            "configs/development.yaml",
-            "--run-dir",
-            str(tmp_path / "run"),
-            "--variant",
-            "memory_tape_nmp",
-            "--lambda-memory",
-            "0.3",
-        ]
-    )
-    config, _ = resolve_config(args)
-    assert config.objective.lambda_transition == 0.3
-    assert "lambda_memory" not in config.to_dict()["objective"]
-
-
 def test_legacy_nextlat_variant_alias_resolves_canonically():
     config = ExperimentConfig.from_dict(
         {

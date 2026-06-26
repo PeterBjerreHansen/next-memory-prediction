@@ -85,17 +85,7 @@ class DataConfig:
 class ObjectiveConfig:
     lambda_transition: float = 1.0
     ntp_pass_weights: list[float] | None = None
-    memory_horizon: int = 1
     dynamics_projection_factor: float = 1.3
-
-    @property
-    def lambda_memory(self) -> float:
-        """Compatibility alias for pre-Round-1 callers."""
-        return self.lambda_transition
-
-    @lambda_memory.setter
-    def lambda_memory(self, value: float) -> None:
-        self.lambda_transition = value
 
     def validate(self) -> None:
         if self.lambda_transition < 0:
@@ -113,8 +103,6 @@ class ObjectiveConfig:
                 )
             if sum(self.ntp_pass_weights) <= 0:
                 raise ValueError("ntp_pass_weights must have positive sum")
-        if self.memory_horizon != 1:
-            raise ValueError("only memory_horizon=1 is implemented")
         if self.dynamics_projection_factor <= 0:
             raise ValueError("dynamics_projection_factor must be positive")
 
@@ -214,17 +202,6 @@ class ExperimentConfig:
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ExperimentConfig":
         objective_payload = dict(payload.get("objective", {}))
-        legacy_lambda = objective_payload.pop("lambda_memory", None)
-        if "lambda_transition" not in objective_payload and legacy_lambda is not None:
-            objective_payload["lambda_transition"] = legacy_lambda
-        elif (
-            legacy_lambda is not None
-            and float(legacy_lambda)
-            != float(objective_payload["lambda_transition"])
-        ):
-            raise ValueError(
-                "objective.lambda_memory and objective.lambda_transition disagree"
-            )
         config = cls(
             name=str(payload["name"]),
             seed=int(payload.get("seed", 0)),
