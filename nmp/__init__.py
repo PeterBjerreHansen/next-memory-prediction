@@ -1,4 +1,4 @@
-"""TinyStories next-memory-prediction research package."""
+"""Countdown next-memory-prediction research package."""
 
 from .config import ExperimentConfig, load_config
 from .models import (

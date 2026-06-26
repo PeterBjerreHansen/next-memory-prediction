@@ -12,9 +12,16 @@ from .config import (
     ExperimentConfig,
     transition_target_for_variant,
 )
+from .countdown import (
+    CountdownTokenizer,
+    check_countdown_solution,
+    check_countdown_solution_nextlat_compat,
+    countdown_solution_token_count,
+)
 from .data import (
-    TinyStoriesTokenizer,
     load_corpora,
+    load_generalization_corpus,
+    make_tokenizer,
     sequential_batches,
 )
 from .diagnostics import (
@@ -25,8 +32,8 @@ from .diagnostics import (
     safe_perplexity,
 )
 from .factory import build_model, count_parameters
-from .models import MemoryTapeOutput, MemoryTapeTransformer
-from .objectives import compute_loss
+from .models import MemoryTapeOutput
+from .objectives import compute_loss, temporal_transition_kl_mask
 from .runtime import autocast_context, resolve_device
 
 
@@ -37,8 +44,9 @@ def evaluate_batches(
     model,
     predictor,
     batches,
-    tokenizer: TinyStoriesTokenizer,
+    tokenizer: CountdownTokenizer,
     device: torch.device,
+    accuracy_prefix: str = "val",
 ) -> dict[str, Any]:
     model.eval()
     if predictor is not None:
@@ -47,8 +55,12 @@ def evaluate_batches(
     pass_totals: list[float] | None = None
     ntp_token_count = 0
     transition_count = 0
+    transition_kl_count = 0
+    transition_ce_count = 0
     for cpu_batch in batches:
-        tokens = cpu_batch.tokens.to(device)
+        batch = cpu_batch.to(device)
+        tokens = batch.tokens
+        transition_config = config.objective.transition
         with autocast_context(device, config.training.precision):
             output = model(tokens)
             losses = compute_loss(
@@ -56,15 +68,23 @@ def evaluate_batches(
                 model=model,
                 output=output,
                 tokens=tokens,
+                target_mask=batch.target_mask,
                 pad_token_id=tokenizer.pad_id,
                 eos_token_id=tokenizer.eos_id,
                 predictor=predictor,
-                lambda_transition=config.objective.transition.lambda_transition,
+                lambda_transition=transition_config.lambda_transition,
+                lambda_kl=getattr(transition_config, "lambda_kl", 1.0),
+                lambda_ce=getattr(transition_config, "lambda_ce", 0.0),
+                transition_horizon=getattr(transition_config, "horizon", 1),
+                transition_target=transition_target_for_variant(
+                    config.model.variant,
+                    transition_config,
+                ),
                 ntp_pass_weights=config.objective.ntp_pass_weights,
             )
         metrics = losses.detached_metrics()
         batch_ntp_tokens = int(
-            (tokens[:, 1:] != tokenizer.pad_id).sum().item()
+            (batch.target_mask & (tokens[:, 1:] != tokenizer.pad_id)).sum().item()
         )
         totals["weighted_ntp_loss"] += (
             float(metrics["weighted_ntp_loss"]) * batch_ntp_tokens
@@ -87,6 +107,36 @@ def evaluate_batches(
                 metrics["transition_prediction_loss"]
             ) * batch_transitions
             transition_count += batch_transitions
+        if metrics["transition_kl_loss"] is not None:
+            kl_tokens = int(
+                temporal_transition_kl_mask(
+                    tokens,
+                    batch.target_mask,
+                    eos_token_id=tokenizer.eos_id,
+                    pad_token_id=tokenizer.pad_id,
+                )
+                .sum()
+                .item()
+            )
+            totals["transition_kl_loss"] += float(
+                metrics["transition_kl_loss"]
+            ) * kl_tokens
+            transition_kl_count += kl_tokens
+        if metrics["transition_ce_loss"] is not None:
+            ce_tokens = int(
+                temporal_transition_kl_mask(
+                    tokens,
+                    batch.target_mask,
+                    eos_token_id=tokenizer.eos_id,
+                    pad_token_id=tokenizer.pad_id,
+                )
+                .sum()
+                .item()
+            )
+            totals["transition_ce_loss"] += float(
+                metrics["transition_ce_loss"]
+            ) * ce_tokens
+            transition_ce_count += ce_tokens
         current_passes = list(map(float, metrics["pass_nlls"]))
         if pass_totals is None:
             pass_totals = [0.0] * len(current_passes)
@@ -108,6 +158,7 @@ def evaluate_batches(
     }
     result["perplexity"] = safe_perplexity(result["final_pass_nll"])
     if predictor is not None:
+        transition_config = config.objective.transition
         transition_prediction_loss = (
             totals["transition_prediction_loss"] / transition_count
             if transition_count
@@ -115,12 +166,119 @@ def evaluate_batches(
         )
         result["transition_prediction_loss"] = transition_prediction_loss
         result["transition_target"] = transition_target_for_variant(
-            config.model.variant
+            config.model.variant,
+            transition_config,
         )
         result["transition_count"] = transition_count
-        result["lambda_transition"] = config.objective.transition.lambda_transition
+        result["transition_horizon"] = getattr(transition_config, "horizon", 1)
+        result["lambda_transition"] = transition_config.lambda_transition
+        lambda_kl = getattr(transition_config, "lambda_kl", 1.0)
+        lambda_ce = getattr(transition_config, "lambda_ce", 0.0)
+        result["lambda_kl"] = lambda_kl
+        result["lambda_ce"] = lambda_ce
         result["loss"] += (
-            config.objective.transition.lambda_transition * transition_prediction_loss
+            transition_config.lambda_transition * transition_prediction_loss
+        )
+        if transition_kl_count:
+            transition_kl_loss = (
+                totals["transition_kl_loss"] / transition_kl_count
+                if transition_kl_count
+                else 0.0
+            )
+            result["transition_kl_loss"] = transition_kl_loss
+            result["transition_kl_count"] = transition_kl_count
+            result["loss"] += lambda_kl * transition_kl_loss
+        if transition_ce_count:
+            transition_ce_loss = totals["transition_ce_loss"] / transition_ce_count
+            result["transition_ce_loss"] = transition_ce_loss
+            result["transition_ce_count"] = transition_ce_count
+            result["loss"] += lambda_ce * transition_ce_loss
+    if getattr(tokenizer, "task", None) == "countdown" and hasattr(config, "data"):
+        result.update(
+            countdown_accuracy_for_batches(
+                config=config,
+                model=model,
+                batches=batches,
+                tokenizer=tokenizer,
+                device=device,
+                prefix=accuracy_prefix,
+            )
+        )
+    return result
+
+
+@torch.no_grad()
+def countdown_accuracy_for_batches(
+    *,
+    config: ExperimentConfig,
+    model,
+    batches,
+    tokenizer: CountdownTokenizer,
+    device: torch.device,
+    prefix: str,
+) -> dict[str, Any]:
+    model.eval()
+    total = 0
+    correct = 0
+    compat_correct = 0
+    valid_equations = [0] * config.data.countdown_num_equations
+    compat_valid_equations = [0] * config.data.countdown_num_equations
+    max_new_tokens = countdown_solution_token_count(
+        config.data.countdown_num_equations
+    )
+    for cpu_batch in batches:
+        batch = cpu_batch.to(device)
+        for row in range(batch.tokens.size(0)):
+            prompt_length = int(batch.prompt_lengths[row].item())
+            full_length = int(batch.lengths[row].item())
+            if prompt_length < 1 or full_length <= prompt_length:
+                continue
+            prompt = batch.tokens[row : row + 1, :prompt_length]
+            numbers = tokenizer.number_tokens(prompt[0].detach().cpu().tolist())
+            if len(numbers) < config.data.countdown_input_numbers + 1:
+                continue
+            input_numbers = numbers[: config.data.countdown_input_numbers]
+            target = numbers[config.data.countdown_input_numbers]
+            generated = model.generate(
+                prompt,
+                max_new_tokens,
+                do_sample=False,
+                inference_mode="recompute",
+                eos_token_id=tokenizer.eos_id,
+            )
+            prediction_tokens = generated[0, prompt_length:].detach().cpu().tolist()
+            prediction = tokenizer.decode(prediction_tokens)
+            checked = check_countdown_solution(
+                input_numbers=input_numbers,
+                target=target,
+                prediction=prediction,
+                num_equations=config.data.countdown_num_equations,
+            )
+            compat_checked = check_countdown_solution_nextlat_compat(
+                input_numbers=input_numbers,
+                target=target,
+                prediction=prediction,
+                num_equations=config.data.countdown_num_equations,
+            )
+            total += 1
+            correct += int(checked.correct)
+            compat_correct += int(compat_checked.correct)
+            for index, is_valid in enumerate(checked.valid_equations):
+                valid_equations[index] += int(is_valid)
+            for index, is_valid in enumerate(compat_checked.valid_equations):
+                compat_valid_equations[index] += int(is_valid)
+    denominator = max(total, 1)
+    result: dict[str, Any] = {
+        f"{prefix}_accuracy": correct / denominator,
+        f"{prefix}_strict_multiset_accuracy": correct / denominator,
+        f"{prefix}_nextlat_compat_accuracy": compat_correct / denominator,
+        f"{prefix}_sequences": total,
+    }
+    for index, value in enumerate(valid_equations, start=1):
+        result[f"{prefix}_valid_equation_{index}"] = value / denominator
+    for index, value in enumerate(compat_valid_equations, start=1):
+        result[f"{prefix}_nextlat_compat_valid_equation_{index}"] = (
+            value / denominator
         )
     return result
 
@@ -131,7 +289,7 @@ def representation_diagnostics(
     config: ExperimentConfig,
     model,
     batches,
-    tokenizer: TinyStoriesTokenizer,
+    tokenizer: CountdownTokenizer,
     device: torch.device,
 ) -> dict[str, Any]:
     hidden_rows = []
@@ -199,69 +357,72 @@ def generation_diagnostics(
     config: ExperimentConfig,
     model,
     val_corpus,
-    tokenizer: TinyStoriesTokenizer,
+    tokenizer: CountdownTokenizer,
     device: torch.device,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     samples = []
-    agreement_counts = [0] * config.evaluation.generation_tokens
-    agreement_totals = [0] * config.evaluation.generation_tokens
+    correct = 0
+    compat_correct = 0
+    max_new_tokens = countdown_solution_token_count(
+        config.data.countdown_num_equations
+    )
 
     for index in range(min(config.evaluation.generation_prompts, len(val_corpus))):
-        encoded = tokenizer.encode(val_corpus[index])
-        if not encoded:
-            continue
-        prompt_ids = encoded[: config.evaluation.prompt_tokens]
+        row = val_corpus[index]
+        encoded, prompt_length = tokenizer.tokenize(
+            row,
+            num_pause_tokens=config.data.num_pause_tokens,
+        )
+        prompt_ids = encoded[:prompt_length]
         prompt = torch.tensor([prompt_ids], dtype=torch.long, device=device)
-        recompute = model.generate(
+        generated = model.generate(
             prompt.clone(),
-            config.evaluation.generation_tokens,
+            max_new_tokens,
             do_sample=False,
             inference_mode="recompute",
+            eos_token_id=tokenizer.eos_id,
         )
-        modes = {"recompute": recompute}
-        if isinstance(model, MemoryTapeTransformer):
-            final_pass = model.generate(
-                prompt.clone(),
-                config.evaluation.generation_tokens,
-                do_sample=False,
-                inference_mode="final_pass",
-            )
-            modes["final_pass"] = final_pass
-            recompute_suffix = recompute[0, len(prompt_ids) :]
-            final_suffix = final_pass[0, len(prompt_ids) :]
-            length = min(recompute_suffix.numel(), final_suffix.numel())
-            for position in range(length):
-                agreement_totals[position] += 1
-                agreement_counts[position] += int(
-                    recompute_suffix[position] == final_suffix[position]
-                )
-
-        row = {
-            "index": index,
-            "prompt": tokenizer.decode(prompt_ids),
-        }
-        for mode, generated in modes.items():
-            row[mode] = tokenizer.decode(generated[0].tolist())
-        samples.append(row)
-
-    agreement_by_position = [
-        (
-            agreement_counts[index] / agreement_totals[index]
-            if agreement_totals[index]
-            else None
+        prediction_tokens = generated[0, prompt_length:].detach().cpu().tolist()
+        prediction = tokenizer.decode(prediction_tokens)
+        numbers = tokenizer.number_tokens(prompt_ids)
+        input_numbers = numbers[: config.data.countdown_input_numbers]
+        target = numbers[config.data.countdown_input_numbers]
+        checked = check_countdown_solution(
+            input_numbers=input_numbers,
+            target=target,
+            prediction=prediction,
+            num_equations=config.data.countdown_num_equations,
         )
-        for index in range(len(agreement_counts))
-    ]
-    valid = [value for value in agreement_by_position if value is not None]
+        compat_checked = check_countdown_solution_nextlat_compat(
+            input_numbers=input_numbers,
+            target=target,
+            prediction=prediction,
+            num_equations=config.data.countdown_num_equations,
+        )
+        correct += int(checked.correct)
+        compat_correct += int(compat_checked.correct)
+        samples.append(
+            {
+                "index": index,
+                "prompt": row.split("|", 1)[0] + "|",
+                "expected": row.split("|", 1)[1],
+                "prediction": prediction,
+                "correct": checked.correct,
+                "nextlat_compat_correct": compat_checked.correct,
+                "valid_equations": list(checked.valid_equations),
+                "nextlat_compat_valid_equations": list(
+                    compat_checked.valid_equations
+                ),
+            }
+        )
+
+    count = len(samples)
     metrics = {
-        "recompute_final_pass_agreement": (
-            None if not valid else sum(valid) / len(valid)
+        "sample_accuracy": (correct / count) if count else None,
+        "nextlat_compat_sample_accuracy": (
+            compat_correct / count if count else None
         ),
-        "agreement_by_generated_position": agreement_by_position,
-        "disagreement_by_generated_position": [
-            None if value is None else 1.0 - value
-            for value in agreement_by_position
-        ],
+        "samples": count,
     }
     return metrics, samples
 
@@ -281,7 +442,7 @@ def load_run(
     if device_override is not None:
         config.training.device = device_override
     device = resolve_device(config.training.device)
-    tokenizer = TinyStoriesTokenizer()
+    tokenizer = make_tokenizer(config.data)
     model, predictor = build_model(config, vocab_size=tokenizer.vocab_size)
     restore_checkpoint(
         checkpoint,
@@ -320,6 +481,7 @@ def evaluate_run(
         tokenizer,
         batch_size=config.training.micro_batch_size,
         block_size=config.model.block_size,
+        num_pause_tokens=config.data.num_pause_tokens,
         num_batches=config.training.eval_batches,
     )
     loss_metrics = evaluate_batches(
@@ -335,6 +497,7 @@ def evaluate_run(
         tokenizer,
         batch_size=config.training.micro_batch_size,
         block_size=config.model.block_size,
+        num_pause_tokens=config.data.num_pause_tokens,
         num_batches=config.evaluation.diagnostic_batches,
     )
     diagnostic_loss_metrics = evaluate_batches(
@@ -359,14 +522,37 @@ def evaluate_run(
         tokenizer=tokenizer,
         device=device,
     )
+    generalization = None
+    generalization_corpus = load_generalization_corpus(config.data)
+    if generalization_corpus is not None:
+        generalization_batches = sequential_batches(
+            generalization_corpus,
+            tokenizer,
+            batch_size=config.training.micro_batch_size,
+            block_size=config.model.block_size,
+            num_pause_tokens=config.data.num_pause_tokens,
+            num_batches=config.evaluation.diagnostic_batches,
+        )
+        generalization = countdown_accuracy_for_batches(
+            config=config,
+            model=model,
+            batches=generalization_batches,
+            tokenizer=tokenizer,
+            device=device,
+            prefix="generalization",
+        )
     result = {
         "step": int(checkpoint["step"]),
         "checkpoint": checkpoint_name,
         "variant": config.model.variant,
         "transition_target": transition_target_for_variant(
-            config.model.variant
+            config.model.variant,
+            config.objective.transition,
         ),
+        "transition_horizon": config.objective.transition.horizon,
         "lambda_transition": config.objective.transition.lambda_transition,
+        "lambda_kl": config.objective.transition.lambda_kl,
+        "lambda_ce": config.objective.transition.lambda_ce,
         "parameters": count_parameters(model, predictor),
         "protocol": {
             "config_source": "checkpoint",
@@ -374,13 +560,16 @@ def evaluate_run(
             "loss_batches": config.training.eval_batches,
             "diagnostic_source": "evaluation.diagnostic_batches",
             "diagnostic_batches": config.evaluation.diagnostic_batches,
-            "checkpoint_selection_metric": "final_pass_nll",
+            "checkpoint_selection_metric": config.evaluation.checkpoint_metric,
+            "checkpoint_selection_mode": config.evaluation.checkpoint_mode,
         },
         "loss": loss_metrics,
         "diagnostic_loss": diagnostic_loss_metrics,
         "representations": representations,
         "generation": generation,
     }
+    if generalization is not None:
+        result["generalization"] = generalization
     write_json(artifacts.evaluation_path, result)
     if artifacts.samples_path.exists():
         artifacts.samples_path.unlink()

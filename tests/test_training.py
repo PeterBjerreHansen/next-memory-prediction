@@ -13,14 +13,18 @@ from nmp.training import train_experiment
 
 @pytest.mark.parametrize(
     "variant",
-    ["memory_tape_nmp", "memory_tape_hidden_transition"],
+    [
+        "memory_tape_nmp",
+        "memory_tape_hidden_transition",
+        "memory_tape_hidden_transition_kl",
+    ],
 )
 def test_checkpoint_resume_is_exact(
     variant,
-    local_story_files,
+    local_countdown_files,
     tmp_path: Path,
 ):
-    train_file, val_file = local_story_files
+    train_file, val_file = local_countdown_files
     full_config = make_config(
         variant,
         train_file,

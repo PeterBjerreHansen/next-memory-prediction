@@ -3,15 +3,15 @@ base_config: configs/scales/development.yaml
 runs_root: runs
 
 selection:
-  metric: final_pass_nll
-  mode: min
+  metric: val_accuracy
+  mode: max
   select_lambda_per_variant: true
 
 shared_overrides:
   objective:
     ntp_pass_weights: [0.0, 0.0, 0.5, 0.5]
 
-seeds: [0, 1, 2]
+seeds: [0]
 
 conditions:
   - name: transformer_ntp
@@ -28,6 +28,10 @@ conditions:
 
   - name: memory_tape_hidden_transition
     variant: memory_tape_hidden_transition
+    lambda_transition: [0.1, 0.3, 1.0, 3.0]
+
+  - name: memory_tape_hidden_transition_kl
+    variant: memory_tape_hidden_transition_kl
     lambda_transition: [0.1, 0.3, 1.0, 3.0]
 
 post_run:

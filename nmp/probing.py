@@ -154,6 +154,7 @@ def train_probes(
         tokenizer,
         batch_size=config.evaluation.probe_batch_size,
         block_size=config.model.block_size,
+        num_pause_tokens=config.data.num_pause_tokens,
         seed=config.seed + 9001,
     )
     sources = ["hidden"]
@@ -202,6 +203,7 @@ def train_probes(
         tokenizer,
         batch_size=config.evaluation.probe_batch_size,
         block_size=config.model.block_size,
+        num_pause_tokens=config.data.num_pause_tokens,
         num_batches=config.evaluation.diagnostic_batches,
     )
     rows = evaluate_probes(

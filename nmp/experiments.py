@@ -82,16 +82,24 @@ def _read_evaluation(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
-def _best_validation_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _best_validation_row(
+    rows: list[dict[str, Any]],
+    *,
+    metric: str,
+    mode: str,
+) -> dict[str, Any]:
     validation = [
         row
         for row in rows
         if row.get("event") == "validation"
-        and row.get("final_pass_nll") is not None
+        and row.get(metric) is not None
     ]
+    if not validation and metric != "final_pass_nll":
+        return _best_validation_row(rows, metric="final_pass_nll", mode="min")
     if not validation:
         raise ValueError("run contains no validation metrics")
-    return min(validation, key=lambda row: float(row["final_pass_nll"]))
+    key = lambda row: float(row[metric])
+    return max(validation, key=key) if mode == "max" else min(validation, key=key)
 
 
 def _metric_with_fallback(
@@ -106,7 +114,12 @@ def _metric_with_fallback(
     return fallback.get(key, default)
 
 
-def load_run_record(spec: ExpandedRunSpec) -> dict[str, Any]:
+def load_run_record(
+    spec: ExpandedRunSpec,
+    *,
+    selection_metric: str = "val_accuracy",
+    selection_mode: str = "max",
+) -> dict[str, Any]:
     run_dir = Path(spec.run_dir)
     _require_run_artifacts(run_dir)
     artifacts = artifacts_for(run_dir)
@@ -124,7 +137,11 @@ def load_run_record(spec: ExpandedRunSpec) -> dict[str, Any]:
         raise ValueError(f"transition weight mismatch in {run_dir}")
 
     metrics = read_jsonl(artifacts.metrics_path)
-    best_validation = _best_validation_row(metrics)
+    best_validation = _best_validation_row(
+        metrics,
+        metric=selection_metric,
+        mode=selection_mode,
+    )
     evaluation = _read_evaluation(artifacts.evaluation_path)
     evaluation_loss = evaluation["loss"]
     diagnostic_loss = evaluation.get("diagnostic_loss")
@@ -143,8 +160,15 @@ def load_run_record(spec: ExpandedRunSpec) -> dict[str, Any]:
     transition_loss = best_validation.get("transition_prediction_loss")
     if transition_loss is None:
         transition_loss = evaluation_loss.get("transition_prediction_loss")
+    transition_kl_loss = best_validation.get("transition_kl_loss")
+    if transition_kl_loss is None:
+        transition_kl_loss = evaluation_loss.get("transition_kl_loss")
+    transition_ce_loss = best_validation.get("transition_ce_loss")
+    if transition_ce_loss is None:
+        transition_ce_loss = evaluation_loss.get("transition_ce_loss")
     parameters = evaluation.get("parameters", {})
     generation = evaluation.get("generation", {})
+    generalization = evaluation.get("generalization", {})
     final_pass_nll = float(best_validation["final_pass_nll"])
     perplexity = _metric_with_fallback(
         best_validation,
@@ -170,11 +194,61 @@ def load_run_record(spec: ExpandedRunSpec) -> dict[str, Any]:
         "variant": spec.variant,
         "seed": spec.seed,
         "lambda_transition": spec.lambda_transition,
-        "transition_target": transition_target_for_variant(spec.variant),
+        "lambda_kl": config.objective.transition.lambda_kl,
+        "lambda_ce": config.objective.transition.lambda_ce,
+        "transition_horizon": config.objective.transition.horizon,
+        "transition_target": transition_target_for_variant(
+            spec.variant,
+            config.objective.transition,
+        ),
         "run_dir": str(run_dir),
         "best_checkpoint_final_pass_nll": final_pass_nll,
+        "best_checkpoint_selection_metric": selection_metric,
+        "best_checkpoint_selection_mode": selection_mode,
+        "best_checkpoint_selection_score": float(
+            best_validation.get(selection_metric, final_pass_nll)
+        ),
         "best_checkpoint_step": int(best_validation["step"]),
         "final_pass_nll": final_pass_nll,
+        "val_accuracy": _metric_with_fallback(
+            best_validation,
+            evaluation_loss,
+            "val_accuracy",
+        ),
+        "val_strict_multiset_accuracy": _metric_with_fallback(
+            best_validation,
+            evaluation_loss,
+            "val_strict_multiset_accuracy",
+            _metric_with_fallback(best_validation, evaluation_loss, "val_accuracy"),
+        ),
+        "val_nextlat_compat_accuracy": _metric_with_fallback(
+            best_validation,
+            evaluation_loss,
+            "val_nextlat_compat_accuracy",
+        ),
+        "val_valid_equation_1": _metric_with_fallback(
+            best_validation,
+            evaluation_loss,
+            "val_valid_equation_1",
+        ),
+        "val_valid_equation_2": _metric_with_fallback(
+            best_validation,
+            evaluation_loss,
+            "val_valid_equation_2",
+        ),
+        "val_valid_equation_3": _metric_with_fallback(
+            best_validation,
+            evaluation_loss,
+            "val_valid_equation_3",
+        ),
+        "generalization_accuracy": generalization.get("generalization_accuracy"),
+        "generalization_strict_multiset_accuracy": generalization.get(
+            "generalization_strict_multiset_accuracy",
+            generalization.get("generalization_accuracy"),
+        ),
+        "generalization_nextlat_compat_accuracy": generalization.get(
+            "generalization_nextlat_compat_accuracy"
+        ),
         "perplexity": None if perplexity is None else float(perplexity),
         "pass_nlls": list(map(float, pass_nlls)),
         "ntp_pass_weights": _metric_with_fallback(
@@ -195,6 +269,12 @@ def load_run_record(spec: ExpandedRunSpec) -> dict[str, Any]:
         "transition_prediction_loss": (
             None if transition_loss is None else float(transition_loss)
         ),
+        "transition_kl_loss": (
+            None if transition_kl_loss is None else float(transition_kl_loss)
+        ),
+        "transition_ce_loss": (
+            None if transition_ce_loss is None else float(transition_ce_loss)
+        ),
         "parameters_model": int(parameters.get("model", 0)),
         "parameters_training_only": int(parameters.get("training_only", 0)),
         "parameters_total_training": int(parameters.get("total_training", 0)),
@@ -202,8 +282,9 @@ def load_run_record(spec: ExpandedRunSpec) -> dict[str, Any]:
             row.get("tokens_per_second") for row in train_rows
         ),
         "wall_time_seconds": wall_time_seconds,
-        "generation_agreement": generation.get(
-            "recompute_final_pass_agreement"
+        "generation_sample_accuracy": generation.get("sample_accuracy"),
+        "generation_nextlat_compat_sample_accuracy": generation.get(
+            "nextlat_compat_sample_accuracy"
         ),
         "representations": evaluation.get("representations", {}),
         "probes": probes,
@@ -216,6 +297,9 @@ def _condition_key(record: dict[str, Any]) -> tuple[str, float | None]:
 
 def select_development_lambdas(
     records: list[dict[str, Any]],
+    *,
+    selection_metric: str,
+    selection_mode: str,
 ) -> dict[str, float]:
     selected: dict[str, float] = {}
     variants = sorted(
@@ -244,13 +328,20 @@ def select_development_lambdas(
                 and record["lambda_transition"] == lambda_transition
             ]
             seed_sets.append({int(row["seed"]) for row in rows})
-            mean_nll = statistics.mean(
-                row["best_checkpoint_final_pass_nll"] for row in rows
+            mean_score = statistics.mean(
+                float(
+                    row[selection_metric]
+                    if row.get(selection_metric) is not None
+                    else row["best_checkpoint_selection_score"]
+                )
+                for row in rows
             )
-            candidates.append((mean_nll, lambda_transition))
+            candidates.append((mean_score, lambda_transition))
         if len({tuple(sorted(seeds)) for seeds in seed_sets}) > 1:
             raise ValueError(f"{variant} lambda candidates have unequal seeds")
-        selected[variant] = min(candidates)[1]
+        selected[variant] = (
+            max(candidates)[1] if selection_mode == "max" else min(candidates)[1]
+        )
     return selected
 
 
@@ -284,18 +375,31 @@ def summarize_conditions(
         grouped.setdefault(_condition_key(record), []).append(record)
     rows = []
     scalar_fields = (
+        "best_checkpoint_selection_score",
+        "val_accuracy",
+        "val_strict_multiset_accuracy",
+        "val_nextlat_compat_accuracy",
+        "val_valid_equation_1",
+        "val_valid_equation_2",
+        "val_valid_equation_3",
+        "generalization_accuracy",
+        "generalization_strict_multiset_accuracy",
+        "generalization_nextlat_compat_accuracy",
         "best_checkpoint_final_pass_nll",
         "final_pass_nll",
         "evaluation_final_pass_nll",
         "diagnostic_final_pass_nll",
         "perplexity",
         "transition_prediction_loss",
+        "transition_kl_loss",
+        "transition_ce_loss",
         "parameters_model",
         "parameters_training_only",
         "parameters_total_training",
         "mean_tokens_per_second",
         "wall_time_seconds",
-        "generation_agreement",
+        "generation_sample_accuracy",
+        "generation_nextlat_compat_sample_accuracy",
     )
     for (variant, lambda_transition), condition in sorted(
         grouped.items(),
@@ -307,7 +411,13 @@ def summarize_conditions(
         summary: dict[str, Any] = {
             "variant": variant,
             "lambda_transition": lambda_transition,
-            "transition_target": transition_target_for_variant(variant),
+            "lambda_kl": condition[0].get("lambda_kl"),
+            "lambda_ce": condition[0].get("lambda_ce"),
+            "transition_horizon": condition[0].get("transition_horizon"),
+            "transition_target": condition[0].get(
+                "transition_target",
+                transition_target_for_variant(variant),
+            ),
             "ntp_pass_weights": condition[0].get("ntp_pass_weights"),
             "seeds": sorted(record["seed"] for record in condition),
         }
@@ -398,6 +508,11 @@ def paired_comparisons(
             "memory_tape_hidden_transition",
             "memory_tape_nmp",
         ),
+        (
+            "hidden_kl_distillation",
+            "memory_tape_hidden_transition",
+            "memory_tape_hidden_transition_kl",
+        ),
     )
     results = []
     available_variants = {record["variant"] for record in conditions.values()}
@@ -420,6 +535,9 @@ def paired_comparisons(
             seed_rows.append(
                 {
                     "seed": seed,
+                    "val_accuracy_delta": (
+                        right["val_accuracy"] - left["val_accuracy"]
+                    ),
                     "best_checkpoint_final_pass_nll_delta": (
                         right["best_checkpoint_final_pass_nll"]
                         - left["best_checkpoint_final_pass_nll"]
@@ -437,8 +555,14 @@ def paired_comparisons(
                 "name": name,
                 "source": source,
                 "target": target,
-                "definition": "target minus source; negative favors target",
+                "definition": (
+                    "target minus source; positive accuracy favors target, "
+                    "negative loss favors target"
+                ),
                 "by_seed": seed_rows,
+                "val_accuracy_delta": _scalar_statistics(
+                    [row["val_accuracy_delta"] for row in seed_rows]
+                ),
                 "best_checkpoint_final_pass_nll_delta": _scalar_statistics(
                     [
                         row["best_checkpoint_final_pass_nll_delta"]
@@ -508,14 +632,14 @@ def write_summary_markdown(
                 "",
                 "## Transition-weight sweep",
                 "",
-                "| Variant | λ | Mean best-checkpoint final-pass NLL |",
+                "| Variant | λ | Mean best-checkpoint selection score |",
                 "|---|---:|---:|",
             ]
         )
         for row in all_condition_summary:
             if row["lambda_transition"] is None:
                 continue
-            score = row["best_checkpoint_final_pass_nll"]
+            score = row["best_checkpoint_selection_score"]
             lines.append(
                 f"| `{row['variant']}` | {row['lambda_transition']:g} | "
                 f"{score['mean']:.4f} ± {score['std']:.4f} |"
@@ -525,8 +649,8 @@ def write_summary_markdown(
             "",
             "## Conditions",
             "",
-            "| Variant | λ | NTP weights | Final-pass NLL | Diagnostic NLL | Perplexity | Transition loss |",
-            "|---|---:|---|---:|---:|---:|---:|",
+            "| Variant | Target | λ | KL λ | CE λ | NTP weights | Strict val | NextLat compat | Generalization | Final-pass NLL | Diagnostic NLL | Transition loss | KL loss | CE loss |",
+            "|---|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in condition_summary:
@@ -541,6 +665,18 @@ def write_summary_markdown(
             if transition is None
             else f"{transition['mean']:.4f} ± {transition['std']:.4f}"
         )
+        transition_kl = row["transition_kl_loss"]
+        transition_kl_text = (
+            "—"
+            if transition_kl is None
+            else f"{transition_kl['mean']:.4f} ± {transition_kl['std']:.4f}"
+        )
+        transition_ce = row["transition_ce_loss"]
+        transition_ce_text = (
+            "—"
+            if transition_ce is None
+            else f"{transition_ce['mean']:.4f} ± {transition_ce['std']:.4f}"
+        )
         weights = row.get("ntp_pass_weights")
         weights_text = (
             "—"
@@ -553,13 +689,39 @@ def write_summary_markdown(
             if diagnostic is None
             else f"{diagnostic['mean']:.4f} ± {diagnostic['std']:.4f}"
         )
+        accuracy = row.get("val_accuracy")
+        accuracy_text = (
+            "—"
+            if accuracy is None
+            else f"{accuracy['mean']:.3f} ± {accuracy['std']:.3f}"
+        )
+        generalization = row.get("generalization_accuracy")
+        generalization_text = (
+            "—"
+            if generalization is None
+            else f"{generalization['mean']:.3f} ± {generalization['std']:.3f}"
+        )
+        compat = row.get("val_nextlat_compat_accuracy")
+        compat_text = (
+            "—"
+            if compat is None
+            else f"{compat['mean']:.3f} ± {compat['std']:.3f}"
+        )
+        lambda_kl = row.get("lambda_kl")
+        lambda_kl_text = "—" if lambda_kl is None else f"{lambda_kl:g}"
+        lambda_ce = row.get("lambda_ce")
+        lambda_ce_text = "—" if lambda_ce is None else f"{lambda_ce:g}"
+        target_text = row.get("transition_target") or "—"
         lines.append(
-            f"| `{row['variant']}` | {lambda_text} | {weights_text} | "
+            f"| `{row['variant']}` | {target_text} | {lambda_text} | "
+            f"{lambda_kl_text} | {lambda_ce_text} | {weights_text} | "
+            f"{accuracy_text} | "
+            f"{compat_text} | "
+            f"{generalization_text} | "
             f"{row['final_pass_nll']['mean']:.4f} ± "
             f"{row['final_pass_nll']['std']:.4f} | "
             f"{diagnostic_text} | "
-            f"{row['perplexity']['mean']:.3f} ± "
-            f"{row['perplexity']['std']:.3f} | {transition_text} |"
+            f"{transition_text} | {transition_kl_text} | {transition_ce_text} |"
         )
     lines.extend(
         [
@@ -567,13 +729,14 @@ def write_summary_markdown(
             "## Compute and generation",
             "",
             "| Variant | Model params | Training-only params | Tokens/s | "
-            "Generation agreement |",
-            "|---|---:|---:|---:|---:|",
+            "Sample accuracy | NextLat sample |",
+            "|---|---:|---:|---:|---:|---:|",
         ]
     )
     for row in condition_summary:
         throughput = row["mean_tokens_per_second"]
-        agreement = row["generation_agreement"]
+        agreement = row["generation_sample_accuracy"]
+        compat_agreement = row["generation_nextlat_compat_sample_accuracy"]
         lines.append(
             f"| `{row['variant']}` | "
             f"{row['parameters_model']['mean']:.0f} | "
@@ -583,6 +746,15 @@ def write_summary_markdown(
                 "—"
                 if agreement is None
                 else f"{agreement['mean']:.3f} ± {agreement['std']:.3f}"
+            )
+            + " | "
+            + (
+                "—"
+                if compat_agreement is None
+                else (
+                    f"{compat_agreement['mean']:.3f} ± "
+                    f"{compat_agreement['std']:.3f}"
+                )
             )
             + " |"
         )
@@ -630,20 +802,20 @@ def write_summary_markdown(
             "",
             "## Paired seed deltas",
             "",
-            "Deltas are target minus source; negative values favor the target.",
+            "Deltas are target minus source; positive accuracy and negative loss favor the target.",
             "",
-            "| Comparison | Source → target | Final-pass NLL Δ | Perplexity Δ |",
+            "| Comparison | Source → target | Val accuracy Δ | Final-pass NLL Δ |",
             "|---|---|---:|---:|",
         ]
     )
     for comparison in comparisons:
         nll = comparison["final_pass_nll_delta"]
-        perplexity = comparison["perplexity_delta"]
+        accuracy = comparison["val_accuracy_delta"]
         lines.append(
             f"| {comparison['name']} | `{comparison['source']}` → "
             f"`{comparison['target']}` | "
+            f"{accuracy['mean']:.4f} ± {accuracy['std']:.4f} | "
             f"{nll['mean']:.4f} ± {nll['std']:.4f} | "
-            f"{perplexity['mean']:.3f} ± {perplexity['std']:.3f} |"
         )
     lines.extend(
         [
@@ -678,17 +850,26 @@ def plot_comparison(
     positions = list(range(len(labels)))
     figure, axes = plt.subplots(1, 2, figsize=(12, 4.5))
     for axis, field, title in (
-        (axes[0], "final_pass_nll", "Final-pass validation NLL"),
-        (axes[1], "perplexity", "Validation perplexity"),
+        (axes[0], "val_accuracy", "Countdown validation accuracy"),
+        (axes[1], "final_pass_nll", "Final-pass validation NLL"),
     ):
+        rows = [row for row in condition_summary if row.get(field) is not None]
+        if not rows:
+            continue
+        positions = list(range(len(rows)))
         axis.errorbar(
             positions,
-            [row[field]["mean"] for row in condition_summary],
-            yerr=[row[field]["std"] for row in condition_summary],
+            [row[field]["mean"] for row in rows],
+            yerr=[row[field]["std"] for row in rows],
             fmt="o",
             capsize=4,
         )
-        axis.set_xticks(positions, labels, rotation=20, ha="right")
+        axis.set_xticks(
+            positions,
+            [row["variant"] for row in rows],
+            rotation=20,
+            ha="right",
+        )
         axis.set_title(title)
         axis.grid(alpha=0.25)
     figure.tight_layout()
@@ -706,6 +887,9 @@ def _variant_order_from_specs(specs: list[ExpandedRunSpec]) -> list[str]:
 
 def _selected_lambdas_from_expanded_records(
     records: list[dict[str, Any]],
+    *,
+    selection_metric: str,
+    selection_mode: str,
 ) -> dict[str, float]:
     by_variant: dict[str, set[float]] = {}
     for record in records:
@@ -713,7 +897,11 @@ def _selected_lambdas_from_expanded_records(
         if value is not None:
             by_variant.setdefault(record["variant"], set()).add(float(value))
     if any(len(values) > 1 for values in by_variant.values()):
-        return select_development_lambdas(records)
+        return select_development_lambdas(
+            records,
+            selection_metric=selection_metric,
+            selection_mode=selection_mode,
+        )
     return {
         variant: next(iter(values))
         for variant, values in by_variant.items()
@@ -726,12 +914,25 @@ def summarize_experiment(
     expanded_runs: str | Path,
     output_dir: str | Path,
     selection_file: str | Path | None = None,
+    selection_metric: str = "val_accuracy",
+    selection_mode: str = "max",
 ) -> dict[str, Any]:
     specs = load_expanded_run_specs(expanded_runs)
     if not specs:
         raise ValueError("expanded run manifest is empty")
-    records = [load_run_record(spec) for spec in specs]
-    selected_lambdas = _selected_lambdas_from_expanded_records(records)
+    records = [
+        load_run_record(
+            spec,
+            selection_metric=selection_metric,
+            selection_mode=selection_mode,
+        )
+        for spec in specs
+    ]
+    selected_lambdas = _selected_lambdas_from_expanded_records(
+        records,
+        selection_metric=selection_metric,
+        selection_mode=selection_mode,
+    )
     if selection_file is not None and not selected_lambdas:
         selected_lambdas = load_selected_lambdas(selection_file)
     selected_records = selected_condition_records(records, selected_lambdas)
@@ -753,8 +954,10 @@ def summarize_experiment(
         "expected_runs": len(specs),
         "completed_runs": len(records),
         "selection_criterion": (
-            "lowest mean best-checkpoint final-pass validation NLL across seeds"
+            f"{selection_mode} mean best-checkpoint {selection_metric} across seeds"
         ),
+        "selection_metric": selection_metric,
+        "selection_mode": selection_mode,
         "selected_lambdas": selected_lambdas,
         "runs": records,
         "all_condition_summary": all_condition_summary,

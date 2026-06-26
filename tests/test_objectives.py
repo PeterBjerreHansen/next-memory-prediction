@@ -11,6 +11,8 @@ from nmp.models import (
 from nmp.objectives import (
     compute_loss,
     next_token_loss,
+    temporal_transition_self_distillation_ce_loss,
+    temporal_transition_self_distillation_kl_loss,
     temporal_transition_prediction_loss,
 )
 
@@ -35,6 +37,23 @@ def test_next_token_loss_masks_padding_but_trains_eos():
     expected = F.cross_entropy(
         logits[:, :2].reshape(-1, 7),
         tokens[:, 1:3].reshape(-1),
+    )
+    assert torch.allclose(actual, expected)
+
+
+def test_next_token_loss_uses_countdown_target_mask():
+    logits = torch.randn(1, 5, 11)
+    tokens = torch.tensor([[2, 3, 4, 5, 1]])
+    target_mask = torch.tensor([[False, False, True, True]])
+    actual = next_token_loss(
+        logits,
+        tokens,
+        pad_token_id=0,
+        target_mask=target_mask,
+    )
+    expected = F.cross_entropy(
+        logits[:, 2:4].reshape(-1, 11),
+        tokens[:, 3:5].reshape(-1),
     )
     assert torch.allclose(actual, expected)
 
@@ -110,6 +129,78 @@ def test_hidden_transition_uses_final_pass_hidden_states():
     assert torch.equal(predictor.seen, output.hidden_states[:, :-1])
 
 
+def test_hidden_transition_kl_uses_final_pass_hidden_states():
+    model = make_model()
+    tokens = torch.tensor([[2, 3, 4, 1, 0]])
+    output = model(tokens)
+
+    class RecordingPredictor(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.seen = None
+
+        def forward(self, current_latent, next_token_embeddings):
+            self.seen = current_latent
+            return current_latent
+
+    predictor = RecordingPredictor()
+    target_mask = torch.tensor([[True, True, True, False]])
+    losses = compute_loss(
+        variant="memory_tape_hidden_transition_kl",
+        model=model,
+        output=output,
+        tokens=tokens,
+        target_mask=target_mask,
+        pad_token_id=0,
+        eos_token_id=1,
+        predictor=predictor,
+    )
+    assert losses.transition_target == "hidden"
+    assert losses.transition_kl is not None
+    assert torch.equal(predictor.seen, output.hidden_states[:, :-1])
+
+
+def test_self_distillation_kl_detaches_teacher_and_lm_head():
+    torch.manual_seed(52)
+    model = make_model()
+    predicted = torch.randn(1, 4, 8, requires_grad=True)
+    teacher_logits = torch.randn(1, 5, 19, requires_grad=True)
+    tokens = torch.tensor([[2, 3, 4, 5, 1]])
+    target_mask = torch.tensor([[False, True, True, True]])
+    loss = temporal_transition_self_distillation_kl_loss(
+        model,
+        predicted,
+        teacher_logits,
+        tokens,
+        target_mask,
+        eos_token_id=1,
+        pad_token_id=0,
+    )
+    loss.backward()
+    assert predicted.grad.abs().sum() > 0
+    assert teacher_logits.grad is None
+    assert model.lm_head.weight.grad is None
+
+
+def test_self_distillation_ce_detaches_lm_head():
+    torch.manual_seed(53)
+    model = make_model()
+    predicted = torch.randn(1, 4, 8, requires_grad=True)
+    tokens = torch.tensor([[2, 3, 4, 5, 1]])
+    target_mask = torch.tensor([[False, True, True, True]])
+    loss = temporal_transition_self_distillation_ce_loss(
+        model,
+        predicted,
+        tokens,
+        target_mask,
+        eos_token_id=1,
+        pad_token_id=0,
+    )
+    loss.backward()
+    assert predicted.grad.abs().sum() > 0
+    assert model.lm_head.weight.grad is None
+
+
 def test_memory_transition_uses_final_pass_memory_states():
     model = make_model()
     tokens = torch.tensor([[2, 3, 4, 1, 0]])
@@ -179,17 +270,18 @@ def test_hidden_transition_detaches_target_and_reaches_current_and_embedding():
 
 @torch.no_grad()
 def test_memory_variants_share_model_initialization_and_predictor_shape(
-    local_story_files,
+    local_countdown_files,
 ):
     from conftest import make_config
     from nmp.factory import build_model, count_parameters
 
-    train_file, val_file = local_story_files
+    train_file, val_file = local_countdown_files
     built = {}
     for variant in (
         "memory_tape_ntp",
         "memory_tape_nmp",
         "memory_tape_hidden_transition",
+        "memory_tape_hidden_transition_kl",
     ):
         torch.manual_seed(77)
         built[variant] = build_model(
@@ -197,15 +289,26 @@ def test_memory_variants_share_model_initialization_and_predictor_shape(
             vocab_size=19,
         )
     baseline_state = built["memory_tape_ntp"][0].state_dict()
-    for variant in ("memory_tape_nmp", "memory_tape_hidden_transition"):
+    for variant in (
+        "memory_tape_nmp",
+        "memory_tape_hidden_transition",
+        "memory_tape_hidden_transition_kl",
+    ):
         for name, value in baseline_state.items():
             assert torch.equal(value, built[variant][0].state_dict()[name])
     memory_predictor = built["memory_tape_nmp"][1]
     hidden_predictor = built["memory_tape_hidden_transition"][1]
+    hidden_kl_predictor = built["memory_tape_hidden_transition_kl"][1]
     for name, value in memory_predictor.state_dict().items():
         assert torch.equal(value, hidden_predictor.state_dict()[name])
+        assert torch.equal(value, hidden_kl_predictor.state_dict()[name])
     assert count_parameters(*built["memory_tape_nmp"])["training_only"] == (
         count_parameters(*built["memory_tape_hidden_transition"])[
+            "training_only"
+        ]
+    )
+    assert count_parameters(*built["memory_tape_nmp"])["training_only"] == (
+        count_parameters(*built["memory_tape_hidden_transition_kl"])[
             "training_only"
         ]
     )
@@ -238,3 +341,81 @@ def test_lambda_zero_reproduces_memory_tape_ntp_total():
             lambda_transition=0.0,
         )
         assert torch.equal(ntp.total, transition_zero.total)
+
+
+@torch.no_grad()
+def test_kl_variant_lambda_zeroes_reproduce_hidden_transition_total():
+    torch.manual_seed(13)
+    model = make_model()
+    predictor = LatentTransitionPredictor(8)
+    tokens = torch.tensor([[2, 3, 4, 1, 0]])
+    target_mask = torch.tensor([[True, True, True, False]])
+    output = model(tokens)
+    hidden = compute_loss(
+        variant="memory_tape_hidden_transition",
+        model=model,
+        output=output,
+        tokens=tokens,
+        target_mask=target_mask,
+        pad_token_id=0,
+        eos_token_id=1,
+        predictor=predictor,
+        lambda_transition=1.0,
+    )
+    hidden_kl = compute_loss(
+        variant="memory_tape_hidden_transition_kl",
+        model=model,
+        output=output,
+        tokens=tokens,
+        target_mask=target_mask,
+        pad_token_id=0,
+        eos_token_id=1,
+        predictor=predictor,
+        lambda_transition=1.0,
+        lambda_kl=0.0,
+        lambda_ce=0.0,
+    )
+    assert hidden_kl.transition_kl is not None
+    assert hidden_kl.transition_ce is not None
+    assert torch.equal(hidden.total, hidden_kl.total)
+
+
+@torch.no_grad()
+def test_kl_variant_lambda_ce_adds_auxiliary_loss():
+    torch.manual_seed(14)
+    model = make_model()
+    predictor = LatentTransitionPredictor(8)
+    tokens = torch.tensor([[2, 3, 4, 1, 0]])
+    target_mask = torch.tensor([[True, True, True, False]])
+    output = model(tokens)
+    without_ce = compute_loss(
+        variant="memory_tape_hidden_transition_kl",
+        model=model,
+        output=output,
+        tokens=tokens,
+        target_mask=target_mask,
+        pad_token_id=0,
+        eos_token_id=1,
+        predictor=predictor,
+        lambda_transition=1.0,
+        lambda_kl=0.0,
+        lambda_ce=0.0,
+    )
+    with_ce = compute_loss(
+        variant="memory_tape_hidden_transition_kl",
+        model=model,
+        output=output,
+        tokens=tokens,
+        target_mask=target_mask,
+        pad_token_id=0,
+        eos_token_id=1,
+        predictor=predictor,
+        lambda_transition=1.0,
+        lambda_kl=0.0,
+        lambda_ce=0.5,
+    )
+    assert with_ce.transition_ce is not None
+    assert torch.allclose(
+        with_ce.total,
+        without_ce.total + 0.5 * with_ce.transition_ce,
+    )

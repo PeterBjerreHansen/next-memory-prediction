@@ -40,6 +40,9 @@ def save_checkpoint(
     step: int,
     best_final_pass_nll: float,
     sampler_state: dict[str, Any],
+    best_selection_metric: float | None = None,
+    selection_metric: str | None = None,
+    selection_mode: str | None = None,
 ) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -47,6 +50,11 @@ def save_checkpoint(
         "config": config.to_dict(),
         "step": int(step),
         "best_final_pass_nll": float(best_final_pass_nll),
+        "best_selection_metric": (
+            None if best_selection_metric is None else float(best_selection_metric)
+        ),
+        "selection_metric": selection_metric,
+        "selection_mode": selection_mode,
         "model_state_dict": model.state_dict(),
         "predictor_state_dict": (
             None if predictor is None else predictor.state_dict()

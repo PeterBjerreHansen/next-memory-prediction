@@ -19,10 +19,11 @@ from nmp.cli.train import main as train_main
         "memory_tape_ntp",
         "memory_tape_nmp",
         "memory_tape_hidden_transition",
+        "memory_tape_hidden_transition_kl",
     ],
 )
-def test_offline_smoke_workflow(variant, local_story_files, tmp_path: Path):
-    train_file, val_file = local_story_files
+def test_offline_smoke_workflow(variant, local_countdown_files, tmp_path: Path):
+    train_file, val_file = local_countdown_files
     run_dir = tmp_path / variant
     train_main(
         [

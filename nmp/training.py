@@ -10,8 +10,8 @@ from .checkpoint import load_checkpoint, restore_checkpoint, save_checkpoint
 from .config import ExperimentConfig, transition_target_for_variant
 from .data import (
     StatefulBatchStream,
-    TinyStoriesTokenizer,
     load_corpora,
+    make_tokenizer,
     sequential_batches,
 )
 from .evaluation import evaluate_batches
@@ -42,13 +42,14 @@ def train_experiment(
     config.validate()
     device = resolve_device(config.training.device)
     set_seed(config.seed)
-    tokenizer = TinyStoriesTokenizer()
+    tokenizer = make_tokenizer(config.data)
     train_corpus, val_corpus = load_corpora(config.data)
     stream = StatefulBatchStream(
         train_corpus,
         tokenizer,
         batch_size=config.training.micro_batch_size,
         block_size=config.model.block_size,
+        num_pause_tokens=config.data.num_pause_tokens,
         seed=config.seed + 101,
     )
     model, predictor = build_model(config, vocab_size=tokenizer.vocab_size)
@@ -66,6 +67,11 @@ def train_experiment(
 
     step = 0
     best_final_pass_nll = float("inf")
+    best_selection_metric = (
+        -float("inf")
+        if config.evaluation.checkpoint_mode == "max"
+        else float("inf")
+    )
     if resume_from is not None:
         checkpoint = load_checkpoint(resume_from, map_location=device)
         restore_checkpoint(
@@ -79,6 +85,9 @@ def train_experiment(
         _optimizer_to(optimizer, device)
         step = int(checkpoint["step"])
         best_final_pass_nll = float(checkpoint["best_final_pass_nll"])
+        saved_best = checkpoint.get("best_selection_metric")
+        if saved_best is not None:
+            best_selection_metric = float(saved_best)
 
     runtime_model = torch.compile(model) if config.training.compile else model
     runtime_predictor = (
@@ -94,9 +103,13 @@ def train_experiment(
             "step": step,
             "variant": config.model.variant,
             "transition_target": transition_target_for_variant(
-                config.model.variant
+                config.model.variant,
+                config.objective.transition,
             ),
+            "transition_horizon": config.objective.transition.horizon,
             "lambda_transition": config.objective.transition.lambda_transition,
+            "lambda_kl": config.objective.transition.lambda_kl,
+            "lambda_ce": config.objective.transition.lambda_ce,
             "ntp_pass_weights": config.objective.ntp_pass_weights,
             "device": str(device),
             "effective_batch_size": config.training.effective_batch_size,
@@ -109,6 +122,7 @@ def train_experiment(
         tokenizer,
         batch_size=config.training.micro_batch_size,
         block_size=config.model.block_size,
+        num_pause_tokens=config.data.num_pause_tokens,
         num_batches=config.training.eval_batches,
     )
     train_window_start = time.perf_counter()
@@ -126,7 +140,12 @@ def train_experiment(
         for _ in range(config.training.gradient_accumulation_steps):
             batch = stream.next_batch().to(device)
             train_window_tokens += int(
-                (batch.tokens[:, 1:] != tokenizer.pad_id).sum().item()
+                (
+                    batch.target_mask
+                    & (batch.tokens[:, 1:] != tokenizer.pad_id)
+                )
+                .sum()
+                .item()
             )
             with autocast_context(device, config.training.precision):
                 output = runtime_model(batch.tokens)
@@ -135,10 +154,18 @@ def train_experiment(
                     model=model,
                     output=output,
                     tokens=batch.tokens,
+                    target_mask=batch.target_mask,
                     pad_token_id=tokenizer.pad_id,
                     eos_token_id=tokenizer.eos_id,
                     predictor=runtime_predictor,
                     lambda_transition=config.objective.transition.lambda_transition,
+                    lambda_kl=config.objective.transition.lambda_kl,
+                    lambda_ce=config.objective.transition.lambda_ce,
+                    transition_horizon=config.objective.transition.horizon,
+                    transition_target=transition_target_for_variant(
+                        config.model.variant,
+                        config.objective.transition,
+                    ),
                     ntp_pass_weights=config.objective.ntp_pass_weights,
                 )
                 scaled_loss = (
@@ -165,6 +192,14 @@ def train_experiment(
                     accumulated["transition_prediction_loss"] += metrics[
                         "transition_prediction_loss"
                     ]
+                if metrics["transition_kl_loss"] is not None:
+                    accumulated["transition_kl_loss"] += metrics[
+                        "transition_kl_loss"
+                    ]
+                if metrics["transition_ce_loss"] is not None:
+                    accumulated["transition_ce_loss"] += metrics[
+                        "transition_ce_loss"
+                    ]
 
         if scaler is not None:
             scaler.unscale_(optimizer)
@@ -188,6 +223,10 @@ def train_experiment(
         ]
         if accumulated["transition_prediction_loss"] is not None:
             accumulated["transition_prediction_loss"] /= divisor
+        if accumulated["transition_kl_loss"] is not None:
+            accumulated["transition_kl_loss"] /= divisor
+        if accumulated["transition_ce_loss"] is not None:
+            accumulated["transition_ce_loss"] /= divisor
 
         if step % config.training.log_interval == 0 or step == 1:
             synchronize(device)
@@ -229,9 +268,16 @@ def train_experiment(
                 artifacts.metrics_path,
                 {"event": "validation", "step": step, **metrics},
             )
-            improved = metrics["final_pass_nll"] < best_final_pass_nll
-            if improved:
+            if metrics["final_pass_nll"] < best_final_pass_nll:
                 best_final_pass_nll = metrics["final_pass_nll"]
+            selection_score = float(metrics[config.evaluation.checkpoint_metric])
+            improved = (
+                selection_score > best_selection_metric
+                if config.evaluation.checkpoint_mode == "max"
+                else selection_score < best_selection_metric
+            )
+            if improved:
+                best_selection_metric = selection_score
             save_checkpoint(
                 artifacts.latest_checkpoint,
                 config=config,
@@ -242,6 +288,9 @@ def train_experiment(
                 step=step,
                 best_final_pass_nll=best_final_pass_nll,
                 sampler_state=stream.state_dict(),
+                best_selection_metric=best_selection_metric,
+                selection_metric=config.evaluation.checkpoint_metric,
+                selection_mode=config.evaluation.checkpoint_mode,
             )
             if improved:
                 save_checkpoint(
@@ -254,6 +303,9 @@ def train_experiment(
                     step=step,
                     best_final_pass_nll=best_final_pass_nll,
                     sampler_state=stream.state_dict(),
+                    best_selection_metric=best_selection_metric,
+                    selection_metric=config.evaluation.checkpoint_metric,
+                    selection_mode=config.evaluation.checkpoint_mode,
                 )
         elif step % config.training.checkpoint_interval == 0:
             save_checkpoint(
@@ -266,6 +318,9 @@ def train_experiment(
                 step=step,
                 best_final_pass_nll=best_final_pass_nll,
                 sampler_state=stream.state_dict(),
+                best_selection_metric=best_selection_metric,
+                selection_metric=config.evaluation.checkpoint_metric,
+                selection_mode=config.evaluation.checkpoint_mode,
             )
 
     append_jsonl(
@@ -274,6 +329,9 @@ def train_experiment(
             "event": "run_end",
             "step": step,
             "best_final_pass_nll": best_final_pass_nll,
+            "best_selection_metric": best_selection_metric,
+            "selection_metric": config.evaluation.checkpoint_metric,
+            "selection_mode": config.evaluation.checkpoint_mode,
             "wall_time_seconds": time.perf_counter() - run_start,
         },
     )

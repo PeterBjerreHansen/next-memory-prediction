@@ -1,219 +1,114 @@
-# Next Memory Prediction
+# Next Memory Prediction on Countdown
 
-This repository asks whether a language model learns better persistent
-memories when it is explicitly trained to predict how those memories evolve.
-The first study uses TinyStories, trunk-matched models, and no chunked-memory
-machinery.
+This repository asks whether a model learns better persistent memories when it
+is explicitly trained to predict how those memories evolve. The current study
+uses the arithmetic Countdown task from the NextLat paper rather than
+TinyStories.
 
-## Motivation
+Countdown is not a literal counting-down task. Each example gives four input
+numbers and a target. The model must generate three valid arithmetic equations
+that combine the available numbers into the target, for example:
 
-Token prediction rewards every predictable surface detail, whether or not that
-detail is useful as an abstraction. This is less stark for language than for
-pixels—tokens are already compressed and semantically dense—but the underlying
-question remains: can an auxiliary latent-space objective put more direct
-pressure on a model to represent structure that is both predictable and useful
-for future prediction?
+```text
+2,3,4,5,14|2+3=5,5+5=10,10+4=14
+```
 
-NextLat predicts a recurrent future latent while retaining next-token
-prediction. Next Memory Prediction explores a related inductive bias: a
-multi-pass transformer emits a persistent tape of memories
-\(m_1,\ldots,m_t\), and later predictions can attend directly to the causal
-prefix of that tape.
+The prompt side is followed by eight `|` pause tokens during tokenization so
+the model has extra compute steps before producing the solution.
 
-The hypothesis is not that latent prediction automatically creates semantic
-representations. It is that, alongside next-token prediction and with a
-stop-gradient target, it may encourage stable predictive structure. Round 1
-therefore separates the effect of the MemoryTape architecture from generic
-latent-transition regularization and transition regularization applied
-specifically to projected memories.
-
-Background material, paper references, and working notes live in
-[`documents/`](documents/). Copied-code, tokenizer, and dataset provenance is pinned in
-[`PROVENANCE.md`](PROVENANCE.md).
-
-## Round 1 conditions
+## Conditions
 
 1. `transformer_ntp`: causal Transformer with next-token prediction.
-2. `memory_tape_ntp`: MemoryTape Transformer with (pass-weighted) NTP loss.
-3. `memory_tape_nmp`: the same MemoryTape model with a final-pass memory
-   transition objective.
-4. `memory_tape_hidden_transition`: the same MemoryTape model with a final-pass
-   hidden-state transition objective.
+2. `memory_tape_ntp`: MemoryTape Transformer with pass-weighted NTP loss.
+3. `memory_tape_nmp`: MemoryTape model with final-pass memory transition loss.
+4. `memory_tape_hidden_transition`: MemoryTape model with final-pass hidden-state
+   transition loss.
+5. `memory_tape_hidden_transition_kl`: hidden-state transition plus a
+   NextLat-style self-distillation KL loss from actual hidden-state teacher
+   logits to predicted-hidden-state student logits, with optional CE on the
+   same student path via `objective.transition.lambda_ce`.
 
-Conditions 2–4 have identical model architecture and initialization under a
-matched seed. Conditions 3 and 4 also use identically shaped and initialized
-training-only transition predictors.
-
-The comparisons answer:
-
-- 1 → 2: effect of the MemoryTape architecture.
-- 2 → 3: effect of explicit-memory transition regularization.
-- 2 → 4: effect of generic hidden-state transition regularization.
-- 4 → 3: whether projected memories help beyond hidden-state regularization.
-
-## Objective
-
-For either final-pass memory or normalized hidden state \(z_t\), the shared
-residual predictor is:
+The transition objective remains the same teacher-forced one-step residual
+predictor:
 
 ```math
 \hat z_{t+1} = z_t + f_\psi([z_t, e(x_{t+1})]).
 ```
 
-The target is stop-gradient, and transitions into EOS or padding are excluded:
+NTP is masked on Countdown prompt and pause tokens. Solution tokens and EOS are
+supervised. Transition loss is masked only for transitions into EOS or padding.
+For the KL variant, the LM head is detached for the student logits, teacher
+logits are stop-gradient, and optional CE uses the predicted hidden state to
+predict the following solution token. The default CE weight is `0.0`.
 
-```math
-L_\mathrm{transition}
-= \operatorname{SmoothL1}(\hat z_{t+1}, \operatorname{sg}(z_{t+1})).
-```
+## Data
 
-For \(K\) MemoryTape passes:
+The custom Countdown tokenizer assigns one atomic token to every integer from
+`0` through `data.countdown_max_intermediate`, plus tokens for `|`, `*`, `/`,
+`+`, `-`, `=`, `,`, EOS, and PAD.
 
-```math
-L = \sum_{k=1}^K w_k L_\mathrm{NTP}^{(k)}
-    + \lambda_\mathrm{transition}L_\mathrm{transition}.
-```
-
-By default, \(w_k = 1/K\). MemoryTape runs can override this with
-`objective.ntp_pass_weights` or the CLI flag `--ntp-pass-weights`, for example
-`[0.0, 0.0, 0.5, 0.5]` for a 4-pass model. Supplied weights are normalized
-internally.
-
-Memory-specific architecture settings live under `model.memory`, currently
-just `model.memory.n_pass`. Transition-objective settings live under
-`objective.transition`, currently `lambda_transition` and `projection_factor`.
-Older flat checkpoint/config payloads are migrated on load, but new presets use
-the nested form.
-
-The auxiliary predictor is training-only. Best checkpoints and transition
-weights are selected solely by final-pass validation NLL. Validation metrics
-are averaged over valid target tokens or valid transitions, not batches.
-The primary reported validation NLL uses the same `training.eval_batches`
-budget as checkpoint selection; smaller `evaluation.diagnostic_batches` runs
-are reported only as diagnostics for representation and generation artifacts.
-
-Optional KL/logit matching, chunked memory, a plain-Transformer transition
-condition, and non-teacher-forced objectives are deferred.
-
-## Install and individual runs
+Smoke configs use deterministic generated data. For paper-scale files:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m nmp.cli.generate_countdown \
+  --output-dir data/countdown \
+  --seed 444 \
+  --input-numbers 4 \
+  --train-samples 500000 \
+  --val-samples 10000 \
+  --generalization-samples 10000
 ```
 
-All variants use the same scale preset:
-
-```bash
-python -m nmp.cli.train \
-  --config configs/scales/smoke.yaml \
-  --variant memory_tape_hidden_transition \
-  --lambda-transition 1.0 \
-  --run-dir runs/smoke/memory_tape_hidden_transition
-```
-
-Use `objective.transition.lambda_transition` or `--lambda-transition` for the
-auxiliary transition objective. The old variant name
-`memory_tape_nextlat_no_kl` is still accepted as a compatibility alias for
-`memory_tape_hidden_transition`.
-
-For offline work, provide line-delimited local story files:
+Then run with local files:
 
 ```bash
 python -m nmp.cli.train \
   --config configs/scales/smoke.yaml \
   --variant memory_tape_nmp \
-  --train-file tests/fixtures/tinystories_train.txt \
-  --val-file tests/fixtures/tinystories_val.txt \
-  --run-dir runs/local/nmp
+  --train-file data/countdown/train1_b4_t100_n500000.txt \
+  --val-file data/countdown/val1_b4_t100_n500000.txt \
+  --generalization-file data/countdown/val_target1_b4_t100_n500000.txt \
+  --run-dir runs/local/countdown-nmp
 ```
 
-Stories that fit within the context receive EOS and padding. Longer stories
-are truncated without an artificial EOS token.
+## Experiments
 
-Resume, evaluate, probe, and plot:
-
-```bash
-python -m nmp.cli.train --resume-from runs/local/nmp/latest.pt --steps 20
-python -m nmp.cli.evaluate --run-dir runs/local/nmp
-python -m nmp.cli.probe --run-dir runs/local/nmp --steps 100
-python -m nmp.cli.plot --run-dir runs/local/nmp
-```
-
-MemoryTape generation supports exact `recompute` inference and recurrent
-`final_pass` inference. The recurrent path always reuses final-pass memory.
-
-## Experiment matrices
-
-Round 1 matrices are defined by explicit experiment manifests under
-`configs/experiments/`. Scale/base run presets live under `configs/scales/`.
-The manifest is the source of truth for variants, seeds, lambda grids, NTP
-pass weights, selection metric, and post-run diagnostics. Each launcher copies
-the manifest into the experiment directory and writes `expanded_runs.jsonl`
-with the exact concrete runs.
-
-The development matrix contains 30 runs:
-
-- Seeds `0`, `1`, and `2`.
-- One run per seed for both NTP baselines.
-- Both transition variants at
-  `lambda_transition ∈ {0.1, 0.3, 1.0, 3.0}`.
-
-Run and summarize it with:
+Run the development matrix:
 
 ```bash
 bash scripts/run_development_matrix.sh runs
 ```
 
-To do a quick single-seed dry run of the launcher without training:
+Run a dry smoke expansion:
 
 ```bash
 bash scripts/run_development_matrix.sh runs --seeds 0 --dry-run
 ```
 
-The shipped Round 1 development and reference manifests set MemoryTape NTP
-pass weights to `[0.0, 0.0, 0.5, 0.5]`. Edit or copy the manifest to run a
-different pass-weight ablation.
+The manifests select transition weights by `val_accuracy` with `mode: max`.
+Reports still include final-pass NLL, perplexity, transition loss, KL/CE
+auxiliary loss diagnostics, throughput, representation diagnostics, generated
+samples, and linear probes.
 
-This selects a transition weight separately for conditions 3 and 4 using the
-lowest mean best-checkpoint final-pass validation NLL across seeds.
+## Evaluation
 
-The reference matrix promotes all four conditions to 100k steps and three
-seeds, for 12 runs:
+Countdown accuracy is measured by greedy-generating the fixed three-equation
+solution from the prompt, parsing equations, checking integer arithmetic,
+tracking available operands as a multiset, and requiring the final equation to
+reach the target. This strict multiset metric is the primary `val_accuracy`.
+Runs also report `val_nextlat_compat_accuracy`, which reproduces the looser
+upstream evaluator by using set membership and not consuming operands.
 
-```bash
-bash scripts/run_reference_matrix.sh runs
-```
+Validation metrics include:
 
-The reference launcher consumes
-`runs/round1_development/summary/selected_lambdas.json`. Both launchers resume
-existing checkpoints, train probes, and generate summaries.
-
-For serious reference runs, freeze the selected development weights into an
-explicit reference manifest:
-
-```bash
-python -m nmp.cli.freeze_reference_experiment \
-  --development-summary runs/round1_development/summary \
-  --template configs/experiments/round1_reference_template.yaml \
-  --output configs/experiments/round1_reference_frozen.yaml
-```
-
-The summary command can also be run directly:
-
-```bash
-python -m nmp.cli.summarize \
-  --experiment configs/experiments/round1_development.yaml \
-  --runs-root runs
-```
-
-Each summary verifies the completed runs against `expanded_runs.jsonl` and
-emits JSON, CSV, Markdown, selected weights, and a comparison plot. Reports
-include individual
-seeds, mean and standard deviation, paired-seed deltas, token and transition
-losses, parameter counts, throughput, generation agreement, representation
-diagnostics, and hidden/memory probes. These are validation results; the same
-10,000-story validation set is used for checkpoint selection, weight
-selection, and reporting.
+- `val_accuracy`
+- `val_strict_multiset_accuracy`
+- `val_nextlat_compat_accuracy`
+- `val_valid_equation_1`
+- `val_valid_equation_2`
+- `val_valid_equation_3`
+- optional `generalization_accuracy` and
+  `generalization_nextlat_compat_accuracy` on held-out target numbers
 
 ## Tests
 
@@ -221,4 +116,5 @@ selection, and reporting.
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q
 ```
 
-Tests and smoke workflows use local fixtures and require no network access.
+Tests and smoke workflows use local Countdown fixtures and require no network
+access.

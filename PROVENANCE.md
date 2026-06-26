@@ -7,27 +7,24 @@ The active transformer and memory-tape implementation is adapted from:
 - Copied components: transformer primitives, causal transformer, multi-pass
   recurrence, memory-tape cross-attention, scalar memory gating, and generation
   modes.
-- Deliberate local deletions: non-scalar memory gate modes, symbolic-task code,
-  unrelated upstream architectures, and legacy objective compatibility aliases.
+- Deliberate local deletions: non-scalar memory gate modes, unrelated upstream
+  architectures, and legacy objective compatibility aliases.
 
-The vendored 1,000-token TinyStories tokenizer comes from:
+The Countdown task setup is adapted from:
 
 - Repository: `https://github.com/JaydenTeoh/NextLat`
 - Commit: `3770be6009cea2b3c455a9ce7f2ca88b504bb955`
-- Source path: `data/tinystories/tokenizer.json`
-- Local representation: the exact tokenizer JSON is compressed and embedded
-  in `nmp/tokenizer_asset.py`; it is reconstructed in memory when loaded.
-
-The default dataset is:
-
-- Hugging Face dataset: `karpathy/tinystories-gpt4-clean`
-- Revision: `0397e27157956705a0260709da3095bb9c43d6a7`
-- License declared by the dataset card: CDLA-Sharing-1.0
+- Source paths: `data/countdown.py`, `data/countdown/generate.py`,
+  `data/countdown/countdown.py`, and `data/countdown/countdown_utils.py`.
+- Local representation: custom atomic integer tokenizer, deterministic
+  generator, strict multiset evaluator, and NextLat-compatible loose evaluator
+  in `nmp/countdown.py`.
 
 Local extensions include structured outputs, configurable MemoryTape NTP pass
-weights, padding-aware objectives, memory- and hidden-state transition
-objectives, experiment configuration, checkpointing, TinyStories loading,
-diagnostics, probing, and reporting.
+weights, padding-aware objectives, explicit transition horizon/target and
+KL/CE weights, memory- and hidden-state transition objectives, NextLat-style
+hidden-state self-distillation KL, Countdown target masking, experiment
+configuration, checkpointing, diagnostics, probing, and reporting.
 
 Research-paper references are listed in `documents/references.md`; paper PDFs
 are intentionally not committed.

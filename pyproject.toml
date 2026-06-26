@@ -1,14 +1,12 @@
 [project]
 name = "next-memory-prediction"
 version = "0.1.0"
-description = "TinyStories experiments for temporal next-memory prediction in multi-pass transformers"
+description = "Countdown experiments for temporal next-memory prediction in multi-pass transformers"
 readme = "readme.md"
 requires-python = ">=3.10"
 dependencies = [
-  "datasets>=2.18",
   "matplotlib>=3.7",
   "pyyaml>=6.0",
-  "tokenizers>=0.15",
   "torch>=2.0",
 ]
 
@@ -23,6 +21,7 @@ nmp-plot = "nmp.cli.plot:main"
 nmp-run-experiment = "nmp.cli.run_experiment:main"
 nmp-freeze-reference-experiment = "nmp.cli.freeze_reference_experiment:main"
 nmp-summarize = "nmp.cli.summarize:main"
+nmp-generate-countdown = "nmp.cli.generate_countdown:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

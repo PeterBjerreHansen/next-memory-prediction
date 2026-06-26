@@ -54,6 +54,8 @@ Round 2: Non-teacher-forced memory prediction
         M_j → p(C_{j+i})
     Test chunk horizons i={1,2,4}.
 
+TODO:
+Move paired comparison definitions into experiment manifests before Round 2.
 
 ### Open questions
 

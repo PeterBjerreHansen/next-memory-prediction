@@ -25,15 +25,21 @@ def main(argv=None):
         root = experiment_dir(plan, args.runs_root)
         expanded_runs = root / "expanded_runs.jsonl"
         output_dir = args.output_dir or root / "summary"
+        selection_metric = plan.selection.metric
+        selection_mode = plan.selection.mode
     else:
         expanded_runs = args.expanded_runs
         output_dir = args.output_dir
         if output_dir is None:
             output_dir = expanded_runs.parent / "summary"
+        selection_metric = "val_accuracy"
+        selection_mode = "max"
     result = summarize_experiment(
         expanded_runs=expanded_runs,
         output_dir=output_dir,
         selection_file=args.selection_file,
+        selection_metric=selection_metric,
+        selection_mode=selection_mode,
     )
     print(
         json.dumps(

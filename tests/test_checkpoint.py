@@ -35,7 +35,9 @@ def test_checkpoint_config_drops_unknown_nested_fields():
                 "retired_model_field": "scalar",
             },
             "objective": {
+                "transition_horizon": 1,
                 "lambda_transition": 0.3,
+                "lambda_ce": 0.2,
                 "dynamics_projection_factor": 1.7,
                 "retired_objective_field": 1,
             },
@@ -50,12 +52,16 @@ def test_checkpoint_config_drops_unknown_nested_fields():
     config = config_from_checkpoint(checkpoint)
 
     assert config.objective.transition.lambda_transition == 0.3
+    assert config.objective.transition.lambda_ce == 0.2
+    assert config.objective.transition.horizon == 1
     assert config.objective.transition.projection_factor == 1.7
     assert config.model.memory.n_pass == 3
     resolved = config.to_dict()
     assert "n_pass" not in resolved["model"]
     assert "retired_model_field" not in resolved["model"]
     assert "lambda_transition" not in resolved["objective"]
+    assert "lambda_ce" not in resolved["objective"]
+    assert "transition_horizon" not in resolved["objective"]
     assert "dynamics_projection_factor" not in resolved["objective"]
     assert "retired_objective_field" not in resolved["objective"]
     assert "retired_training_field" not in resolved["training"]

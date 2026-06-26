@@ -29,10 +29,10 @@ class SelectionConfig:
         return cls(**(payload or {}))
 
     def validate(self) -> None:
-        if self.metric != "final_pass_nll":
-            raise ValueError("only final_pass_nll selection is implemented")
-        if self.mode != "min":
-            raise ValueError("only min selection mode is implemented")
+        if not self.metric:
+            raise ValueError("selection metric must be non-empty")
+        if self.mode not in {"min", "max"}:
+            raise ValueError("selection mode must be min or max")
 
 
 @dataclass(frozen=True)

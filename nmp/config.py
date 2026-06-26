@@ -7,14 +7,12 @@ from typing import Any
 
 import yaml
 
-from .provenance import DATASET_NAME, DATASET_REVISION
-
-
 VARIANTS = (
     "transformer_ntp",
     "memory_tape_ntp",
     "memory_tape_nmp",
     "memory_tape_hidden_transition",
+    "memory_tape_hidden_transition_kl",
 )
 LEGACY_VARIANT_ALIASES = {
     "memory_tape_nextlat_no_kl": "memory_tape_hidden_transition",
@@ -23,6 +21,7 @@ ACCEPTED_VARIANTS = (*VARIANTS, *LEGACY_VARIANT_ALIASES)
 TRANSITION_VARIANTS = (
     "memory_tape_nmp",
     "memory_tape_hidden_transition",
+    "memory_tape_hidden_transition_kl",
 )
 PRECISIONS = ("float32", "bfloat16", "float16")
 
@@ -70,33 +69,69 @@ class ModelConfig:
 
 @dataclass(kw_only=True)
 class DataConfig:
-    source: str = "huggingface"
-    dataset_name: str = DATASET_NAME
-    dataset_revision: str = DATASET_REVISION
-    text_field: str = "text"
-    cache_dir: str | None = None
+    source: str = "generated"
     train_file: str | None = None
     val_file: str | None = None
-    validation_size: int = 10_000
-    split_seed: int = 1234
+    generalization_file: str | None = None
+    countdown_max_intermediate: int = 10_000
+    countdown_min_target: int = 10
+    countdown_max_target: int = 100
+    countdown_input_numbers: int = 4
+    countdown_num_equations: int = 3
+    num_pause_tokens: int = 8
+    train_samples: int = 500_000
+    val_samples: int = 10_000
+    generalization_samples: int = 10_000
+    split_seed: int = 444
 
     def validate(self) -> None:
-        if self.source not in {"huggingface", "local"}:
-            raise ValueError("data.source must be huggingface or local")
+        if self.source not in {"generated", "local"}:
+            raise ValueError("data.source must be generated or local")
         if self.source == "local" and (not self.train_file or not self.val_file):
             raise ValueError("local data requires train_file and val_file")
-        if self.validation_size < 1:
-            raise ValueError("validation_size must be positive")
+        positive = {
+            "countdown_max_intermediate": self.countdown_max_intermediate,
+            "countdown_min_target": self.countdown_min_target,
+            "countdown_max_target": self.countdown_max_target,
+            "countdown_input_numbers": self.countdown_input_numbers,
+            "countdown_num_equations": self.countdown_num_equations,
+            "num_pause_tokens": self.num_pause_tokens,
+            "train_samples": self.train_samples,
+            "val_samples": self.val_samples,
+        }
+        for name, value in positive.items():
+            if value < 1:
+                raise ValueError(f"{name} must be positive")
+        if self.countdown_min_target >= self.countdown_max_target:
+            raise ValueError("countdown_min_target must be less than countdown_max_target")
+        if self.countdown_num_equations != self.countdown_input_numbers - 1:
+            raise ValueError(
+                "countdown_num_equations must equal countdown_input_numbers - 1"
+            )
+        if self.generalization_samples < 0:
+            raise ValueError("generalization_samples must be non-negative")
 
 
 @dataclass(kw_only=True)
 class TransitionObjectiveConfig:
+    horizon: int = 1
     lambda_transition: float = 1.0
+    lambda_kl: float = 1.0
+    lambda_ce: float = 0.0
+    target: str | None = None
     projection_factor: float = 1.3
 
     def validate(self) -> None:
+        if self.horizon != 1:
+            raise ValueError("transition.horizon must be 1 in this implementation")
         if self.lambda_transition < 0:
             raise ValueError("lambda_transition must be non-negative")
+        if self.lambda_kl < 0:
+            raise ValueError("transition.lambda_kl must be non-negative")
+        if self.lambda_ce < 0:
+            raise ValueError("transition.lambda_ce must be non-negative")
+        if self.target is not None and self.target not in {"hidden", "memory"}:
+            raise ValueError("transition.target must be hidden, memory, or null")
         if self.projection_factor <= 0:
             raise ValueError("transition.projection_factor must be positive")
 
@@ -175,6 +210,8 @@ class EvaluationConfig:
     probe_steps: int = 1000
     probe_batch_size: int = 64
     probe_offsets: list[int] = field(default_factory=lambda: list(range(1, 21)))
+    checkpoint_metric: str = "val_accuracy"
+    checkpoint_mode: str = "max"
 
     def validate(self) -> None:
         if min(
@@ -188,6 +225,10 @@ class EvaluationConfig:
             raise ValueError("evaluation counts must be positive")
         if not self.probe_offsets or min(self.probe_offsets) < 1:
             raise ValueError("probe_offsets must contain positive integers")
+        if not self.checkpoint_metric:
+            raise ValueError("checkpoint_metric must be non-empty")
+        if self.checkpoint_mode not in {"min", "max"}:
+            raise ValueError("checkpoint_mode must be min or max")
 
 
 @dataclass(kw_only=True)
@@ -204,6 +245,17 @@ class ExperimentConfig:
         self.model.validate()
         self.data.validate()
         self.objective.validate()
+        default_target = default_transition_target_for_variant(self.model.variant)
+        configured_target = self.objective.transition.target
+        if configured_target is None:
+            self.objective.transition.target = default_target
+        elif default_target is None:
+            raise ValueError("transition.target is only valid for transition variants")
+        elif configured_target != default_target:
+            raise ValueError(
+                f"transition.target must be {default_target!r} for "
+                f"{self.model.variant}"
+            )
         if self.objective.ntp_pass_weights is not None:
             if self.model.variant == "transformer_ntp":
                 raise ValueError(
@@ -251,6 +303,12 @@ def normalize_model_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def normalize_objective_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload)
     transition_payload = dict(normalized.get("transition", {}))
+    nested_legacy_horizon = transition_payload.pop("transition_horizon", None)
+    if nested_legacy_horizon is not None and "horizon" not in transition_payload:
+        transition_payload["horizon"] = nested_legacy_horizon
+    legacy_horizon = normalized.pop("transition_horizon", None)
+    if legacy_horizon is not None and "horizon" not in transition_payload:
+        transition_payload["horizon"] = legacy_horizon
     legacy_lambda_transition = normalized.pop("lambda_transition", None)
     if (
         legacy_lambda_transition is not None
@@ -266,17 +324,39 @@ def normalize_objective_payload(payload: dict[str, Any]) -> dict[str, Any]:
         and "projection_factor" not in transition_payload
     ):
         transition_payload["projection_factor"] = legacy_projection_factor
+    legacy_lambda_kl = normalized.pop("lambda_kl", None)
+    if legacy_lambda_kl is not None and "lambda_kl" not in transition_payload:
+        transition_payload["lambda_kl"] = legacy_lambda_kl
+    legacy_lambda_ce = normalized.pop("lambda_ce", None)
+    if legacy_lambda_ce is not None and "lambda_ce" not in transition_payload:
+        transition_payload["lambda_ce"] = legacy_lambda_ce
+    legacy_target = normalized.pop("transition_target", None)
+    if legacy_target is not None and "target" not in transition_payload:
+        transition_payload["target"] = legacy_target
     normalized["transition"] = transition_payload
     return normalized
 
 
-def transition_target_for_variant(variant: str) -> str | None:
+def default_transition_target_for_variant(variant: str) -> str | None:
     variant = canonicalize_variant(variant)
     if variant == "memory_tape_nmp":
         return "memory"
-    if variant == "memory_tape_hidden_transition":
+    if variant in {
+        "memory_tape_hidden_transition",
+        "memory_tape_hidden_transition_kl",
+    }:
         return "hidden"
     return None
+
+
+def transition_target_for_variant(
+    variant: str,
+    transition: TransitionObjectiveConfig | None = None,
+) -> str | None:
+    configured_target = getattr(transition, "target", None)
+    if configured_target is not None:
+        return configured_target
+    return default_transition_target_for_variant(variant)
 
 
 def load_config(path: str | Path) -> ExperimentConfig:

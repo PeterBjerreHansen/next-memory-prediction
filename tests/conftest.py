@@ -7,24 +7,11 @@ import pytest
 from nmp.config import ExperimentConfig
 
 
-STORIES = [
-    "Once upon a time, a little fox found a red ball in the garden.",
-    "Mia and Tom built a small boat and sailed across the blue pond.",
-    "The kind bear helped a bird put its nest back in the tree.",
-    "Lucy lost her toy, but her friend Sam found it under the bed.",
-    "A green frog jumped over a rock and made everyone laugh.",
-    "The puppy was scared of the rain until Lily gave it a warm blanket.",
-    "Ben planted a seed and watched a bright flower grow.",
-    "The tiny mouse shared its cake with all the animals.",
-]
-
-
 @pytest.fixture
-def local_story_files(tmp_path: Path) -> tuple[Path, Path]:
-    train = tmp_path / "train.txt"
-    val = tmp_path / "val.txt"
-    train.write_text("\n".join(STORIES * 2) + "\n", encoding="utf-8")
-    val.write_text("\n".join(reversed(STORIES)) + "\n", encoding="utf-8")
+def local_countdown_files() -> tuple[Path, Path]:
+    root = Path(__file__).parent / "fixtures"
+    train = root / "countdown_train.txt"
+    val = root / "countdown_val.txt"
     return train, val
 
 
@@ -41,7 +28,7 @@ def make_config(
             "seed": 11,
             "model": {
                 "variant": variant,
-                "block_size": 24,
+                "block_size": 40,
                 "n_layer": 1,
                 "n_head": 2,
                 "n_embd": 16,
@@ -51,6 +38,10 @@ def make_config(
                 "source": "local",
                 "train_file": str(train_file),
                 "val_file": str(val_file),
+                "countdown_max_intermediate": 10000,
+                "countdown_input_numbers": 4,
+                "countdown_num_equations": 3,
+                "num_pause_tokens": 8,
             },
             "objective": {
                 "transition": {
@@ -78,6 +69,8 @@ def make_config(
                 "probe_steps": 1,
                 "probe_batch_size": 2,
                 "probe_offsets": [1, 2],
+                "checkpoint_metric": "val_accuracy",
+                "checkpoint_mode": "max",
             },
         }
     )

@@ -29,7 +29,7 @@ def parse_ntp_pass_weights(value: str) -> list[float]:
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Train a TinyStories NMP experiment.")
+    parser = argparse.ArgumentParser(description="Train a Countdown NMP experiment.")
     parser.add_argument("--config", type=Path)
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument("--resume-from", type=Path)
@@ -41,6 +41,10 @@ def parse_args(argv=None):
         choices=ACCEPTED_VARIANTS,
     )
     parser.add_argument("--lambda-transition", type=float)
+    parser.add_argument("--lambda-kl", type=float)
+    parser.add_argument("--lambda-ce", type=float)
+    parser.add_argument("--transition-horizon", type=int)
+    parser.add_argument("--transition-target", choices=("hidden", "memory"))
     parser.add_argument(
         "--ntp-pass-weights",
         type=parse_ntp_pass_weights,
@@ -51,6 +55,7 @@ def parse_args(argv=None):
     )
     parser.add_argument("--train-file")
     parser.add_argument("--val-file")
+    parser.add_argument("--generalization-file")
     parser.add_argument("--skip-evaluate", action="store_true")
     parser.add_argument("--skip-plot", action="store_true")
     return parser.parse_args(argv)
@@ -63,9 +68,14 @@ def validate_resume_args(args) -> None:
         "--seed": args.seed,
         "--variant": args.variant,
         "--lambda-transition": args.lambda_transition,
+        "--lambda-kl": args.lambda_kl,
+        "--lambda-ce": args.lambda_ce,
+        "--transition-horizon": args.transition_horizon,
+        "--transition-target": args.transition_target,
         "--ntp-pass-weights": args.ntp_pass_weights,
         "--train-file": args.train_file,
         "--val-file": args.val_file,
+        "--generalization-file": args.generalization_file,
     }
     used = [name for name, value in forbidden.items() if value is not None]
     if used:
@@ -96,9 +106,18 @@ def resolve_config(args) -> tuple[ExperimentConfig, Path]:
         config.seed = args.seed
     if args.variant is not None:
         config.model.variant = canonicalize_variant(args.variant)
+        config.objective.transition.target = None
         config.name = f"{config.name}-{config.model.variant}"
     if args.lambda_transition is not None:
         config.objective.transition.lambda_transition = args.lambda_transition
+    if args.lambda_kl is not None:
+        config.objective.transition.lambda_kl = args.lambda_kl
+    if args.lambda_ce is not None:
+        config.objective.transition.lambda_ce = args.lambda_ce
+    if args.transition_horizon is not None:
+        config.objective.transition.horizon = args.transition_horizon
+    if args.transition_target is not None:
+        config.objective.transition.target = args.transition_target
     if args.ntp_pass_weights is not None:
         config.objective.ntp_pass_weights = args.ntp_pass_weights
     if args.train_file is not None or args.val_file is not None:
@@ -107,6 +126,8 @@ def resolve_config(args) -> tuple[ExperimentConfig, Path]:
         config.data.source = "local"
         config.data.train_file = args.train_file
         config.data.val_file = args.val_file
+    if args.generalization_file is not None:
+        config.data.generalization_file = args.generalization_file
     config.validate()
     return config, Path(run_dir)
 

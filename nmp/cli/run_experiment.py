@@ -193,6 +193,8 @@ def main(argv=None):
                 runs_root=args.runs_root,
                 selection_file=args.selection_file,
             ),
+            selection_metric=plan.selection.metric,
+            selection_mode=plan.selection.mode,
         )
 
 

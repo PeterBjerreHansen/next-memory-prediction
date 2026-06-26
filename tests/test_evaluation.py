@@ -8,7 +8,11 @@ import torch.nn as nn
 
 from conftest import make_config
 from nmp.artifacts import artifacts_for
-from nmp.data import TextBatch
+from nmp.countdown import (
+    check_countdown_solution,
+    check_countdown_solution_nextlat_compat,
+)
+from nmp.data import SequenceBatch
 from nmp.evaluation import evaluate_batches
 from nmp.evaluation import evaluate_run
 from nmp.models import (
@@ -19,6 +23,88 @@ from nmp.models import (
 )
 from nmp.objectives import compute_loss, next_token_loss
 from nmp.training import train_experiment
+
+
+def test_countdown_solution_checker_accepts_valid_duplicate_operands():
+    checked = check_countdown_solution(
+        input_numbers=[2, 3, 4, 5],
+        target=14,
+        prediction="2+3=5,5+5=10,10+4=14",
+        num_equations=3,
+    )
+    assert checked.correct
+    assert checked.valid_equations == (True, True, True)
+
+
+def test_nextlat_compat_checker_allows_reusing_consumed_numbers():
+    prediction = "2+3=5,5+5=10,10+5=15"
+    strict = check_countdown_solution(
+        input_numbers=[2, 3, 4, 5],
+        target=15,
+        prediction=prediction,
+        num_equations=3,
+    )
+    compat = check_countdown_solution_nextlat_compat(
+        input_numbers=[2, 3, 4, 5],
+        target=15,
+        prediction=prediction,
+        num_equations=3,
+    )
+
+    assert not strict.correct
+    assert strict.valid_equations == (True, True, False)
+    assert compat.correct
+    assert compat.valid_equations == (True, True, True)
+
+
+def test_nextlat_compat_checker_uses_set_multiplicity():
+    prediction = "2+3=5,5+5=10,10+4=14"
+    strict = check_countdown_solution(
+        input_numbers=[2, 3, 4, 6],
+        target=14,
+        prediction=prediction,
+        num_equations=3,
+    )
+    compat = check_countdown_solution_nextlat_compat(
+        input_numbers=[2, 3, 4, 6],
+        target=14,
+        prediction=prediction,
+        num_equations=3,
+    )
+
+    assert not strict.correct
+    assert compat.correct
+
+
+@pytest.mark.parametrize(
+    "prediction",
+    [
+        "2+3=5,5+5=10",
+        "2+3=6,6+5=11,11+4=15",
+        "9+3=12,12+5=17,17+4=21",
+        "5/2=2,2+3=5,5+4=9",
+        "2+3=5,5+5=10,10+4=15",
+    ],
+)
+def test_countdown_solution_checker_rejects_invalid_outputs(prediction):
+    checked = check_countdown_solution(
+        input_numbers=[2, 3, 4, 5],
+        target=14,
+        prediction=prediction,
+        num_equations=3,
+    )
+    assert not checked.correct
+
+
+def test_nextlat_compat_checker_still_rejects_invalid_division():
+    checked = check_countdown_solution_nextlat_compat(
+        input_numbers=[2, 3, 4, 5],
+        target=9,
+        prediction="5/2=2,2+3=5,5+4=9",
+        num_equations=3,
+    )
+
+    assert not checked.correct
 
 
 class UnequalBatchLossModel(nn.Module):
@@ -33,13 +119,17 @@ class UnequalBatchLossModel(nn.Module):
 def test_validation_nll_is_weighted_by_valid_target_tokens():
     model = UnequalBatchLossModel()
     batches = [
-        TextBatch(
+        SequenceBatch(
             tokens=torch.tensor([[2, 1, 0, 0]]),
             lengths=torch.tensor([2]),
+            target_mask=torch.tensor([[True, False, False]]),
+            prompt_lengths=torch.tensor([1]),
         ),
-        TextBatch(
+        SequenceBatch(
             tokens=torch.tensor([[3, 4, 2, 1]]),
             lengths=torch.tensor([4]),
+            target_mask=torch.tensor([[True, True, True]]),
+            prompt_lengths=torch.tensor([1]),
         ),
     ]
     config = SimpleNamespace(
@@ -95,13 +185,17 @@ def test_validation_transition_loss_is_weighted_by_valid_transitions():
     )
     predictor = LatentTransitionPredictor(8)
     batches = [
-        TextBatch(
+        SequenceBatch(
             tokens=torch.tensor([[2, 3, 1, 0]]),
             lengths=torch.tensor([3]),
+            target_mask=torch.tensor([[True, True, False]]),
+            prompt_lengths=torch.tensor([1]),
         ),
-        TextBatch(
+        SequenceBatch(
             tokens=torch.tensor([[4, 5, 6, 7]]),
             lengths=torch.tensor([4]),
+            target_mask=torch.tensor([[True, True, True]]),
+            prompt_lengths=torch.tensor([1]),
         ),
     ]
     config = SimpleNamespace(
@@ -142,10 +236,10 @@ def test_validation_transition_loss_is_weighted_by_valid_transitions():
 
 
 def test_evaluate_run_uses_training_eval_batches_for_reported_loss(
-    local_story_files,
+    local_countdown_files,
     tmp_path,
 ):
-    train_file, val_file = local_story_files
+    train_file, val_file = local_countdown_files
     config = make_config(
         "transformer_ntp",
         train_file,

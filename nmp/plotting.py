@@ -37,6 +37,20 @@ def plot_training(run_dir: str | Path) -> Path | None:
                 [transition_loss_from_row(row) for row in transition_rows],
                 label="transition prediction",
             )
+        kl_rows = [row for row in train if row.get("transition_kl_loss") is not None]
+        if kl_rows:
+            axes[1].plot(
+                [row["step"] for row in kl_rows],
+                [row["transition_kl_loss"] for row in kl_rows],
+                label="transition KL",
+            )
+        ce_rows = [row for row in train if row.get("transition_ce_loss") is not None]
+        if ce_rows:
+            axes[1].plot(
+                [row["step"] for row in ce_rows],
+                [row["transition_ce_loss"] for row in ce_rows],
+                label="transition CE",
+            )
     if validation:
         axes[0].plot(
             [row["step"] for row in validation],
@@ -44,14 +58,35 @@ def plot_training(run_dir: str | Path) -> Path | None:
             marker="o",
             label="validation final-pass NLL",
         )
-        axes[1].plot(
-            [row["step"] for row in validation],
-            [row["perplexity"] for row in validation],
-            marker="o",
-            label="validation perplexity",
-        )
-    axes[0].set_title("Language modeling")
-    axes[1].set_title("Auxiliary / validation")
+        accuracy_rows = [row for row in validation if row.get("val_accuracy") is not None]
+        if accuracy_rows:
+            axes[1].plot(
+                [row["step"] for row in accuracy_rows],
+                [row["val_accuracy"] for row in accuracy_rows],
+                marker="o",
+                label="strict validation accuracy",
+            )
+            compat_rows = [
+                row
+                for row in validation
+                if row.get("val_nextlat_compat_accuracy") is not None
+            ]
+            if compat_rows:
+                axes[1].plot(
+                    [row["step"] for row in compat_rows],
+                    [row["val_nextlat_compat_accuracy"] for row in compat_rows],
+                    marker="o",
+                    label="NextLat-compatible accuracy",
+                )
+        else:
+            axes[1].plot(
+                [row["step"] for row in validation],
+                [row["perplexity"] for row in validation],
+                marker="o",
+                label="validation perplexity",
+            )
+    axes[0].set_title("Token objective")
+    axes[1].set_title("Countdown / auxiliary")
     for axis in axes:
         axis.set_xlabel("optimizer step")
         axis.grid(alpha=0.25)

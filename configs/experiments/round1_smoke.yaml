@@ -3,8 +3,8 @@ base_config: configs/scales/smoke.yaml
 runs_root: runs
 
 selection:
-  metric: final_pass_nll
-  mode: min
+  metric: val_accuracy
+  mode: max
   select_lambda_per_variant: true
 
 shared_overrides:
@@ -28,6 +28,10 @@ conditions:
 
   - name: memory_tape_hidden_transition
     variant: memory_tape_hidden_transition
+    lambda_transition: [1.0]
+
+  - name: memory_tape_hidden_transition_kl
+    variant: memory_tape_hidden_transition_kl
     lambda_transition: [1.0]
 
 post_run:

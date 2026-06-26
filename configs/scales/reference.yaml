@@ -9,10 +9,24 @@ model:
   memory:
     n_pass: 4
 data:
-  source: huggingface
+  source: generated
+  countdown_max_intermediate: 10000
+  countdown_min_target: 10
+  countdown_max_target: 100
+  countdown_input_numbers: 4
+  countdown_num_equations: 3
+  num_pause_tokens: 8
+  train_samples: 500000
+  val_samples: 10000
+  generalization_samples: 10000
+  split_seed: 444
 objective:
   transition:
+    horizon: 1
+    target: null
     lambda_transition: 1.0
+    lambda_kl: 1.0
+    lambda_ce: 0.0
     projection_factor: 1.3
 training:
   train_steps: 100000
@@ -28,7 +42,9 @@ training:
 evaluation:
   generation_prompts: 16
   prompt_tokens: 32
-  generation_tokens: 128
+  generation_tokens: 17
   diagnostic_batches: 20
   probe_steps: 20000
   probe_batch_size: 256
+  checkpoint_metric: val_accuracy
+  checkpoint_mode: max
