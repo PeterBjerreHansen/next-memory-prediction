@@ -34,16 +34,27 @@ def canonicalize_variant(variant: str) -> str:
 
 
 @dataclass(kw_only=True)
+class MemoryConfig:
+    n_pass: int = 4
+
+    def validate(self) -> None:
+        if self.n_pass < 2:
+            raise ValueError("memory.n_pass must be at least 2")
+
+
+@dataclass(kw_only=True)
 class ModelConfig:
     variant: str
     block_size: int
     n_layer: int
     n_head: int
     n_embd: int
-    n_pass: int = 4
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     def validate(self) -> None:
         self.variant = canonicalize_variant(self.variant)
+        if isinstance(self.memory, dict):
+            self.memory = MemoryConfig(**self.memory)
         if self.variant not in VARIANTS:
             accepted = ", ".join(ACCEPTED_VARIANTS)
             raise ValueError(f"variant must be one of: {accepted}")
@@ -53,8 +64,8 @@ class ModelConfig:
             raise ValueError("n_layer, n_head, and n_embd must be positive")
         if self.n_embd % self.n_head != 0:
             raise ValueError("n_embd must be divisible by n_head")
-        if self.variant != "transformer_ntp" and self.n_pass < 2:
-            raise ValueError("memory-tape variants require n_pass >= 2")
+        if self.variant != "transformer_ntp":
+            self.memory.validate()
 
 
 @dataclass(kw_only=True)
@@ -79,14 +90,28 @@ class DataConfig:
 
 
 @dataclass(kw_only=True)
-class ObjectiveConfig:
+class TransitionObjectiveConfig:
     lambda_transition: float = 1.0
-    ntp_pass_weights: list[float] | None = None
-    dynamics_projection_factor: float = 1.3
+    projection_factor: float = 1.3
 
     def validate(self) -> None:
         if self.lambda_transition < 0:
             raise ValueError("lambda_transition must be non-negative")
+        if self.projection_factor <= 0:
+            raise ValueError("transition.projection_factor must be positive")
+
+
+@dataclass(kw_only=True)
+class ObjectiveConfig:
+    ntp_pass_weights: list[float] | None = None
+    transition: TransitionObjectiveConfig = field(
+        default_factory=TransitionObjectiveConfig
+    )
+
+    def validate(self) -> None:
+        if isinstance(self.transition, dict):
+            self.transition = TransitionObjectiveConfig(**self.transition)
+        self.transition.validate()
         if self.ntp_pass_weights is not None:
             self.ntp_pass_weights = [
                 float(weight) for weight in self.ntp_pass_weights
@@ -100,8 +125,6 @@ class ObjectiveConfig:
                 )
             if sum(self.ntp_pass_weights) <= 0:
                 raise ValueError("ntp_pass_weights must have positive sum")
-        if self.dynamics_projection_factor <= 0:
-            raise ValueError("dynamics_projection_factor must be positive")
 
 
 @dataclass(kw_only=True)
@@ -186,7 +209,7 @@ class ExperimentConfig:
                 raise ValueError(
                     "ntp_pass_weights are only valid for memory-tape variants"
                 )
-            if len(self.objective.ntp_pass_weights) != self.model.n_pass:
+            if len(self.objective.ntp_pass_weights) != self.model.memory.n_pass:
                 raise ValueError(
                     "ntp_pass_weights must have one entry per MemoryTape pass"
                 )
@@ -198,11 +221,14 @@ class ExperimentConfig:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ExperimentConfig":
-        objective_payload = dict(payload.get("objective", {}))
+        model_payload = normalize_model_payload(payload["model"])
+        objective_payload = normalize_objective_payload(
+            payload.get("objective", {})
+        )
         config = cls(
             name=str(payload["name"]),
             seed=int(payload.get("seed", 0)),
-            model=ModelConfig(**payload["model"]),
+            model=ModelConfig(**model_payload),
             data=DataConfig(**payload.get("data", {})),
             objective=ObjectiveConfig(**objective_payload),
             training=TrainingConfig(**payload["training"]),
@@ -210,6 +236,38 @@ class ExperimentConfig:
         )
         config.validate()
         return config
+
+
+def normalize_model_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    memory_payload = dict(normalized.get("memory", {}))
+    legacy_n_pass = normalized.pop("n_pass", None)
+    if legacy_n_pass is not None and "n_pass" not in memory_payload:
+        memory_payload["n_pass"] = legacy_n_pass
+    normalized["memory"] = memory_payload
+    return normalized
+
+
+def normalize_objective_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    transition_payload = dict(normalized.get("transition", {}))
+    legacy_lambda_transition = normalized.pop("lambda_transition", None)
+    if (
+        legacy_lambda_transition is not None
+        and "lambda_transition" not in transition_payload
+    ):
+        transition_payload["lambda_transition"] = legacy_lambda_transition
+    legacy_projection_factor = normalized.pop(
+        "dynamics_projection_factor",
+        None,
+    )
+    if (
+        legacy_projection_factor is not None
+        and "projection_factor" not in transition_payload
+    ):
+        transition_payload["projection_factor"] = legacy_projection_factor
+    normalized["transition"] = transition_payload
+    return normalized
 
 
 def transition_target_for_variant(variant: str) -> str | None:

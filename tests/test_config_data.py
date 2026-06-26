@@ -108,12 +108,13 @@ def test_legacy_nextlat_variant_alias_resolves_canonically():
                 "n_layer": 1,
                 "n_head": 1,
                 "n_embd": 8,
-                "n_pass": 2,
+                "memory": {"n_pass": 2},
             },
             "training": {"train_steps": 1, "micro_batch_size": 1},
         }
     )
     assert config.model.variant == "memory_tape_hidden_transition"
+    assert config.model.memory.n_pass == 2
 
 
 def test_ntp_pass_weights_validate_against_memory_tape_pass_count():
@@ -127,13 +128,44 @@ def test_ntp_pass_weights_validate_against_memory_tape_pass_count():
                 "n_layer": 1,
                 "n_head": 1,
                 "n_embd": 8,
-                "n_pass": 4,
+                "memory": {"n_pass": 4},
             },
             "objective": {"ntp_pass_weights": [0, 0, 0.5, 0.5]},
             "training": {"train_steps": 1, "micro_batch_size": 1},
         }
     )
     assert config.objective.ntp_pass_weights == [0.0, 0.0, 0.5, 0.5]
+    assert config.to_dict()["model"]["memory"]["n_pass"] == 4
+
+
+def test_legacy_flat_memory_and_transition_fields_migrate_to_nested_config():
+    config = ExperimentConfig.from_dict(
+        {
+            "name": "legacy-flat",
+            "seed": 0,
+            "model": {
+                "variant": "memory_tape_nmp",
+                "block_size": 8,
+                "n_layer": 1,
+                "n_head": 1,
+                "n_embd": 8,
+                "n_pass": 3,
+            },
+            "objective": {
+                "lambda_transition": 0.3,
+                "dynamics_projection_factor": 1.7,
+            },
+            "training": {"train_steps": 1, "micro_batch_size": 1},
+        }
+    )
+
+    resolved = config.to_dict()
+    assert config.model.memory.n_pass == 3
+    assert config.objective.transition.lambda_transition == 0.3
+    assert config.objective.transition.projection_factor == 1.7
+    assert "n_pass" not in resolved["model"]
+    assert "lambda_transition" not in resolved["objective"]
+    assert "dynamics_projection_factor" not in resolved["objective"]
 
 
 def test_ntp_pass_weights_cli_parses_json_list(tmp_path):

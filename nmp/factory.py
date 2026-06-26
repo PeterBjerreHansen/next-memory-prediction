@@ -39,13 +39,13 @@ def build_model(
             n_layer=model_config.n_layer,
             n_head=model_config.n_head,
             n_embd=model_config.n_embd,
-            n_pass=model_config.n_pass,
+            n_pass=model_config.memory.n_pass,
         )
     )
     predictor = (
         LatentTransitionPredictor(
             model_config.n_embd,
-            projection_factor=config.objective.dynamics_projection_factor,
+            projection_factor=config.objective.transition.projection_factor,
         )
         if model_config.variant in TRANSITION_VARIANTS
         else None

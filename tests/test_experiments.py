@@ -52,14 +52,16 @@ def _write_synthetic_run(
                 "n_layer": 1,
                 "n_head": 1,
                 "n_embd": 8,
-                "n_pass": 2,
+                "memory": {"n_pass": 2},
             },
             "objective": {
-                "lambda_transition": (
-                    1.0
-                    if lambda_transition is None
-                    else lambda_transition
-                )
+                "transition": {
+                    "lambda_transition": (
+                        1.0
+                        if lambda_transition is None
+                        else lambda_transition
+                    )
+                }
             },
             "training": {"train_steps": 1, "micro_batch_size": 1},
         }
@@ -217,4 +219,3 @@ def test_reference_manifest_has_twelve_runs():
         },
     )
     assert len(specs) == 12
-

@@ -12,9 +12,13 @@ from .config import (
     DataConfig,
     EvaluationConfig,
     ExperimentConfig,
+    MemoryConfig,
     ModelConfig,
     ObjectiveConfig,
+    TransitionObjectiveConfig,
     TrainingConfig,
+    normalize_model_payload,
+    normalize_objective_payload,
 )
 
 
@@ -85,12 +89,26 @@ def _drop_unknown_fields(payload: Any, config_type) -> dict[str, Any]:
 
 def migrate_checkpoint_config(payload: dict[str, Any]) -> dict[str, Any]:
     config = copy.deepcopy(payload)
-    config["model"] = _drop_unknown_fields(config.get("model", {}), ModelConfig)
+    model_payload = normalize_model_payload(config.get("model", {}))
+    model_payload = _drop_unknown_fields(model_payload, ModelConfig)
+    model_payload["memory"] = _drop_unknown_fields(
+        model_payload.get("memory", {}),
+        MemoryConfig,
+    )
+    config["model"] = model_payload
     config["data"] = _drop_unknown_fields(config.get("data", {}), DataConfig)
-    config["objective"] = _drop_unknown_fields(
-        config.get("objective", {}),
+    objective_payload = normalize_objective_payload(
+        config.get("objective", {})
+    )
+    objective_payload = _drop_unknown_fields(
+        objective_payload,
         ObjectiveConfig,
     )
+    objective_payload["transition"] = _drop_unknown_fields(
+        objective_payload.get("transition", {}),
+        TransitionObjectiveConfig,
+    )
+    config["objective"] = objective_payload
     config["training"] = _drop_unknown_fields(
         config.get("training", {}),
         TrainingConfig,

@@ -96,7 +96,7 @@ def train_experiment(
             "transition_target": transition_target_for_variant(
                 config.model.variant
             ),
-            "lambda_transition": config.objective.lambda_transition,
+            "lambda_transition": config.objective.transition.lambda_transition,
             "ntp_pass_weights": config.objective.ntp_pass_weights,
             "device": str(device),
             "effective_batch_size": config.training.effective_batch_size,
@@ -138,7 +138,7 @@ def train_experiment(
                     pad_token_id=tokenizer.pad_id,
                     eos_token_id=tokenizer.eos_id,
                     predictor=runtime_predictor,
-                    lambda_transition=config.objective.lambda_transition,
+                    lambda_transition=config.objective.transition.lambda_transition,
                     ntp_pass_weights=config.objective.ntp_pass_weights,
                 )
                 scaled_loss = (

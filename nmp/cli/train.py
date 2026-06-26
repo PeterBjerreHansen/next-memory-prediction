@@ -96,7 +96,7 @@ def resolve_config(args) -> tuple[ExperimentConfig, Path]:
         config.model.variant = canonicalize_variant(args.variant)
         config.name = f"{config.name}-{config.model.variant}"
     if args.lambda_transition is not None:
-        config.objective.lambda_transition = args.lambda_transition
+        config.objective.transition.lambda_transition = args.lambda_transition
     if args.ntp_pass_weights is not None:
         config.objective.ntp_pass_weights = args.ntp_pass_weights
     if args.train_file is not None or args.val_file is not None:

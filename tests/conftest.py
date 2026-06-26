@@ -45,7 +45,7 @@ def make_config(
                 "n_layer": 1,
                 "n_head": 2,
                 "n_embd": 16,
-                "n_pass": 2,
+                "memory": {"n_pass": 2},
             },
             "data": {
                 "source": "local",
@@ -53,8 +53,10 @@ def make_config(
                 "val_file": str(val_file),
             },
             "objective": {
-                "lambda_transition": 1.0,
-                "dynamics_projection_factor": 1.3,
+                "transition": {
+                    "lambda_transition": 1.0,
+                    "projection_factor": 1.3,
+                },
             },
             "training": {
                 "train_steps": train_steps,

@@ -59,7 +59,7 @@ def evaluate_batches(
                 pad_token_id=tokenizer.pad_id,
                 eos_token_id=tokenizer.eos_id,
                 predictor=predictor,
-                lambda_transition=config.objective.lambda_transition,
+                lambda_transition=config.objective.transition.lambda_transition,
                 ntp_pass_weights=config.objective.ntp_pass_weights,
             )
         metrics = losses.detached_metrics()
@@ -118,9 +118,9 @@ def evaluate_batches(
             config.model.variant
         )
         result["transition_count"] = transition_count
-        result["lambda_transition"] = config.objective.lambda_transition
+        result["lambda_transition"] = config.objective.transition.lambda_transition
         result["loss"] += (
-            config.objective.lambda_transition * transition_prediction_loss
+            config.objective.transition.lambda_transition * transition_prediction_loss
         )
     return result
 
@@ -366,7 +366,7 @@ def evaluate_run(
         "transition_target": transition_target_for_variant(
             config.model.variant
         ),
-        "lambda_transition": config.objective.lambda_transition,
+        "lambda_transition": config.objective.transition.lambda_transition,
         "parameters": count_parameters(model, predictor),
         "protocol": {
             "config_source": "checkpoint",

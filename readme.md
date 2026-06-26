@@ -79,6 +79,12 @@ By default, \(w_k = 1/K\). MemoryTape runs can override this with
 `[0.0, 0.0, 0.5, 0.5]` for a 4-pass model. Supplied weights are normalized
 internally.
 
+Memory-specific architecture settings live under `model.memory`, currently
+just `model.memory.n_pass`. Transition-objective settings live under
+`objective.transition`, currently `lambda_transition` and `projection_factor`.
+Older flat checkpoint/config payloads are migrated on load, but new presets use
+the nested form.
+
 The auxiliary predictor is training-only. Best checkpoints and transition
 weights are selected solely by final-pass validation NLL. Validation metrics
 are averaged over valid target tokens or valid transitions, not batches.
@@ -105,8 +111,9 @@ python -m nmp.cli.train \
   --run-dir runs/smoke/memory_tape_hidden_transition
 ```
 
-Use `lambda_transition` for the auxiliary transition objective. The old variant
-name `memory_tape_nextlat_no_kl` is still accepted as a compatibility alias for
+Use `objective.transition.lambda_transition` or `--lambda-transition` for the
+auxiliary transition objective. The old variant name
+`memory_tape_nextlat_no_kl` is still accepted as a compatibility alias for
 `memory_tape_hidden_transition`.
 
 For offline work, provide line-delimited local story files:

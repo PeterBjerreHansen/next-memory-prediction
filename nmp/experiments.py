@@ -177,7 +177,7 @@ def load_run_record(
             f"found {config.model.variant}/seed {config.seed}"
         )
     if spec.lambda_transition is not None and (
-        float(config.objective.lambda_transition)
+        float(config.objective.transition.lambda_transition)
         != float(spec.lambda_transition)
     ):
         raise ValueError(f"transition weight mismatch in {run_dir}")
@@ -231,7 +231,7 @@ def load_run_record(
         "lambda_transition": (
             None
             if spec.variant in BASELINE_VARIANTS
-            else float(config.objective.lambda_transition)
+            else float(config.objective.transition.lambda_transition)
         ),
         "transition_target": transition_target_for_variant(spec.variant),
         "run_dir": str(run_dir),
