@@ -116,26 +116,6 @@ def test_legacy_nextlat_variant_alias_resolves_canonically():
     assert config.model.variant == "memory_tape_hidden_transition"
 
 
-def test_non_scalar_memory_gate_modes_are_rejected():
-    with pytest.raises(ValueError, match="fixed to scalar"):
-        ExperimentConfig.from_dict(
-            {
-                "name": "bad-gate",
-                "seed": 0,
-                "model": {
-                    "variant": "memory_tape_ntp",
-                    "block_size": 8,
-                    "n_layer": 1,
-                    "n_head": 1,
-                    "n_embd": 8,
-                    "n_pass": 2,
-                    "memory_tape_gate": "tanh",
-                },
-                "training": {"train_steps": 1, "micro_batch_size": 1},
-            }
-        )
-
-
 def test_ntp_pass_weights_validate_against_memory_tape_pass_count():
     config = ExperimentConfig.from_dict(
         {

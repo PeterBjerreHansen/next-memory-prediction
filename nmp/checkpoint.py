@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import fields
 import random
 from pathlib import Path
 from typing import Any
 
 import torch
 
-from .config import ExperimentConfig
+from .config import (
+    DataConfig,
+    EvaluationConfig,
+    ExperimentConfig,
+    ModelConfig,
+    ObjectiveConfig,
+    TrainingConfig,
+)
 
 
 def _torch_load(path: str | Path, *, map_location="cpu") -> dict[str, Any]:
@@ -60,19 +68,37 @@ def load_checkpoint(path: str | Path, *, map_location="cpu") -> dict[str, Any]:
     return _torch_load(path, map_location=map_location)
 
 
+def _known_fields(config_type) -> set[str]:
+    return {field.name for field in fields(config_type)}
+
+
+def _drop_unknown_fields(payload: Any, config_type) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    known = _known_fields(config_type)
+    return {
+        key: value
+        for key, value in payload.items()
+        if key in known
+    }
+
+
 def migrate_checkpoint_config(payload: dict[str, Any]) -> dict[str, Any]:
     config = copy.deepcopy(payload)
-    objective = dict(config.get("objective", {}))
-    objective.pop("memory_horizon", None)
-    legacy_lambda = objective.pop("lambda_memory", None)
-    if legacy_lambda is not None:
-        if "lambda_transition" not in objective:
-            objective["lambda_transition"] = legacy_lambda
-        elif float(legacy_lambda) != float(objective["lambda_transition"]):
-            raise ValueError(
-                "checkpoint objective lambda_memory and lambda_transition disagree"
-            )
-    config["objective"] = objective
+    config["model"] = _drop_unknown_fields(config.get("model", {}), ModelConfig)
+    config["data"] = _drop_unknown_fields(config.get("data", {}), DataConfig)
+    config["objective"] = _drop_unknown_fields(
+        config.get("objective", {}),
+        ObjectiveConfig,
+    )
+    config["training"] = _drop_unknown_fields(
+        config.get("training", {}),
+        TrainingConfig,
+    )
+    config["evaluation"] = _drop_unknown_fields(
+        config.get("evaluation", {}),
+        EvaluationConfig,
+    )
     return config
 
 

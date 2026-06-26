@@ -20,7 +20,7 @@ def test_eval_style_restore_does_not_require_rng_state():
     )
 
 
-def test_checkpoint_config_migrates_retired_objective_fields():
+def test_checkpoint_config_drops_unknown_nested_fields():
     checkpoint = {
         "config": {
             "name": "old",
@@ -31,14 +31,16 @@ def test_checkpoint_config_migrates_retired_objective_fields():
                 "n_layer": 1,
                 "n_head": 1,
                 "n_embd": 8,
+                "retired_model_field": "scalar",
             },
             "objective": {
                 "lambda_transition": 0.3,
-                "memory_horizon": 1,
+                "retired_objective_field": 1,
             },
             "training": {
                 "train_steps": 1,
                 "micro_batch_size": 1,
+                "retired_training_field": True,
             },
         }
     }
@@ -46,4 +48,7 @@ def test_checkpoint_config_migrates_retired_objective_fields():
     config = config_from_checkpoint(checkpoint)
 
     assert config.objective.lambda_transition == 0.3
-    assert "memory_horizon" not in config.to_dict()["objective"]
+    resolved = config.to_dict()
+    assert "retired_model_field" not in resolved["model"]
+    assert "retired_objective_field" not in resolved["objective"]
+    assert "retired_training_field" not in resolved["training"]

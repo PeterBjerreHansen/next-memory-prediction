@@ -41,7 +41,6 @@ class ModelConfig:
     n_head: int
     n_embd: int
     n_pass: int = 4
-    memory_tape_gate: str = "scalar"
 
     def validate(self) -> None:
         self.variant = canonicalize_variant(self.variant)
@@ -56,8 +55,6 @@ class ModelConfig:
             raise ValueError("n_embd must be divisible by n_head")
         if self.variant != "transformer_ntp" and self.n_pass < 2:
             raise ValueError("memory-tape variants require n_pass >= 2")
-        if self.memory_tape_gate != "scalar":
-            raise ValueError("memory_tape_gate is fixed to scalar")
 
 
 @dataclass(kw_only=True)
