@@ -106,7 +106,6 @@ class TransitionObjectiveConfig:
     horizon: int = 1
     lambda_transition: float = 1.0
     lambda_kl: float = 1.0
-    lambda_ce: float = 0.0
     target: str | None = None
     projection_factor: float = 1.3
 
@@ -117,8 +116,6 @@ class TransitionObjectiveConfig:
             raise ValueError("lambda_transition must be non-negative")
         if self.lambda_kl < 0:
             raise ValueError("transition.lambda_kl must be non-negative")
-        if self.lambda_ce < 0:
-            raise ValueError("transition.lambda_ce must be non-negative")
         if self.target is not None and self.target not in {"hidden", "memory"}:
             raise ValueError("transition.target must be hidden, memory, or null")
         if self.projection_factor <= 0:
@@ -302,6 +299,28 @@ def transition_target_for_variant(
     if configured_target is not None:
         return configured_target
     return default_transition_target_for_variant(variant)
+
+
+def active_objective_metadata(
+    variant: str,
+    transition: TransitionObjectiveConfig,
+) -> dict[str, float | int | str | None]:
+    if variant not in TRANSITION_VARIANTS:
+        return {
+            "transition_target": None,
+            "transition_horizon": None,
+            "lambda_transition": None,
+            "lambda_kl": None,
+        }
+    metadata: dict[str, float | int | str | None] = {
+        "transition_target": transition_target_for_variant(variant, transition),
+        "transition_horizon": getattr(transition, "horizon", 1),
+        "lambda_transition": getattr(transition, "lambda_transition", 1.0),
+        "lambda_kl": None,
+    }
+    if variant == "memory_tape_hidden_transition_kl":
+        metadata["lambda_kl"] = getattr(transition, "lambda_kl", 1.0)
+    return metadata
 
 
 def load_config(path: str | Path) -> ExperimentConfig:

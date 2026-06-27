@@ -86,7 +86,6 @@ def _write_synthetic_run(
                         if lambda_transition is None
                         else lambda_transition
                     ),
-                    "lambda_ce": 0.0,
                 }
             },
             "training": {"train_steps": 1, "micro_batch_size": 1},
@@ -164,9 +163,6 @@ def _write_synthetic_run(
                 "transition_kl_loss": (
                     0.05 if variant == "memory_tape_hidden_transition_kl" else None
                 ),
-                "transition_ce_loss": (
-                    0.0 if variant == "memory_tape_hidden_transition_kl" else None
-                ),
             },
             "diagnostic_loss": {
                 "final_pass_nll": best_nll + 9.0,
@@ -175,9 +171,6 @@ def _write_synthetic_run(
                 "transition_prediction_loss": 9.0 if transition else None,
                 "transition_kl_loss": (
                     0.5 if variant == "memory_tape_hidden_transition_kl" else None
-                ),
-                "transition_ce_loss": (
-                    0.0 if variant == "memory_tape_hidden_transition_kl" else None
                 ),
             },
             "parameters": {

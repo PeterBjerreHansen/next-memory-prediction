@@ -10,6 +10,7 @@ from .artifacts import append_jsonl, artifacts_for, write_json
 from .checkpoint import config_from_checkpoint, load_checkpoint, restore_checkpoint
 from .config import (
     ExperimentConfig,
+    active_objective_metadata,
     transition_target_for_variant,
 )
 from .countdown import (
@@ -57,7 +58,6 @@ def evaluate_batches(
     ntp_token_count = 0
     transition_count = 0
     transition_kl_count = 0
-    transition_ce_count = 0
     for cpu_batch in batches:
         batch = cpu_batch.to(device)
         tokens = batch.tokens
@@ -75,7 +75,6 @@ def evaluate_batches(
                 predictor=predictor,
                 lambda_transition=transition_config.lambda_transition,
                 lambda_kl=getattr(transition_config, "lambda_kl", 1.0),
-                lambda_ce=getattr(transition_config, "lambda_ce", 0.0),
                 transition_horizon=getattr(transition_config, "horizon", 1),
                 transition_target=transition_target_for_variant(
                     config.model.variant,
@@ -123,21 +122,6 @@ def evaluate_batches(
                 metrics["transition_kl_loss"]
             ) * kl_tokens
             transition_kl_count += kl_tokens
-        if metrics["transition_ce_loss"] is not None:
-            ce_tokens = int(
-                temporal_transition_kl_mask(
-                    tokens,
-                    batch.target_mask,
-                    eos_token_id=tokenizer.eos_id,
-                    pad_token_id=tokenizer.pad_id,
-                )
-                .sum()
-                .item()
-            )
-            totals["transition_ce_loss"] += float(
-                metrics["transition_ce_loss"]
-            ) * ce_tokens
-            transition_ce_count += ce_tokens
         current_passes = list(map(float, metrics["pass_nlls"]))
         if pass_totals is None:
             pass_totals = [0.0] * len(current_passes)
@@ -166,17 +150,14 @@ def evaluate_batches(
             else 0.0
         )
         result["transition_prediction_loss"] = transition_prediction_loss
-        result["transition_target"] = transition_target_for_variant(
-            config.model.variant,
-            transition_config,
+        result.update(
+            active_objective_metadata(
+                config.model.variant,
+                transition_config,
+            )
         )
         result["transition_count"] = transition_count
-        result["transition_horizon"] = getattr(transition_config, "horizon", 1)
-        result["lambda_transition"] = transition_config.lambda_transition
         lambda_kl = getattr(transition_config, "lambda_kl", 1.0)
-        lambda_ce = getattr(transition_config, "lambda_ce", 0.0)
-        result["lambda_kl"] = lambda_kl
-        result["lambda_ce"] = lambda_ce
         result["loss"] += (
             transition_config.lambda_transition * transition_prediction_loss
         )
@@ -189,11 +170,6 @@ def evaluate_batches(
             result["transition_kl_loss"] = transition_kl_loss
             result["transition_kl_count"] = transition_kl_count
             result["loss"] += lambda_kl * transition_kl_loss
-        if transition_ce_count:
-            transition_ce_loss = totals["transition_ce_loss"] / transition_ce_count
-            result["transition_ce_loss"] = transition_ce_loss
-            result["transition_ce_count"] = transition_ce_count
-            result["loss"] += lambda_ce * transition_ce_loss
     if (
         include_accuracy
         and getattr(tokenizer, "task", None) == "countdown"
@@ -570,14 +546,10 @@ def evaluate_run(
         "step": int(checkpoint["step"]),
         "checkpoint": checkpoint_name,
         "variant": config.model.variant,
-        "transition_target": transition_target_for_variant(
+        **active_objective_metadata(
             config.model.variant,
             config.objective.transition,
         ),
-        "transition_horizon": config.objective.transition.horizon,
-        "lambda_transition": config.objective.transition.lambda_transition,
-        "lambda_kl": config.objective.transition.lambda_kl,
-        "lambda_ce": config.objective.transition.lambda_ce,
         "parameters": count_parameters(model, predictor),
         "protocol": {
             "config_source": "checkpoint",

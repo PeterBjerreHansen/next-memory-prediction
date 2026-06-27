@@ -50,13 +50,6 @@ def plot_training(run_dir: str | Path) -> Path | None:
                 [row["transition_kl_loss"] for row in kl_rows],
                 label="transition KL",
             )
-        ce_rows = [row for row in train if row.get("transition_ce_loss") is not None]
-        if ce_rows:
-            axes[1].plot(
-                [row["step"] for row in ce_rows],
-                [row["transition_ce_loss"] for row in ce_rows],
-                label="transition CE",
-            )
     if validation:
         axes[0].plot(
             [row["step"] for row in validation],

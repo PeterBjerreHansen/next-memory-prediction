@@ -162,7 +162,6 @@ def test_hidden_transition_kl_variant_validates():
     assert config.objective.transition.target == "hidden"
     assert config.objective.transition.horizon == 1
     assert config.objective.transition.lambda_kl == 1.0
-    assert config.objective.transition.lambda_ce == 0.0
 
 
 def test_transition_target_must_match_variant():
@@ -236,8 +235,6 @@ def test_transition_objective_cli_overrides(tmp_path):
             "0.3",
             "--lambda-kl",
             "0.7",
-            "--lambda-ce",
-            "0.2",
             "--transition-horizon",
             "1",
             "--transition-target",
@@ -250,7 +247,6 @@ def test_transition_objective_cli_overrides(tmp_path):
     assert transition.horizon == 1
     assert transition.lambda_transition == 0.3
     assert transition.lambda_kl == 0.7
-    assert transition.lambda_ce == 0.2
 
 
 def test_resume_rejects_config_mutating_overrides(tmp_path):

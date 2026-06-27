@@ -11,7 +11,6 @@ from nmp.models import (
 from nmp.objectives import (
     compute_loss,
     next_token_loss,
-    temporal_transition_self_distillation_ce_loss,
     temporal_transition_self_distillation_kl_loss,
     temporal_transition_prediction_loss,
 )
@@ -179,25 +178,6 @@ def test_self_distillation_kl_detaches_teacher_and_lm_head():
     loss.backward()
     assert predicted.grad.abs().sum() > 0
     assert teacher_logits.grad is None
-    assert model.lm_head.weight.grad is None
-
-
-def test_self_distillation_ce_detaches_lm_head():
-    torch.manual_seed(53)
-    model = make_model()
-    predicted = torch.randn(1, 4, 8, requires_grad=True)
-    tokens = torch.tensor([[2, 3, 4, 5, 1]])
-    target_mask = torch.tensor([[False, True, True, True]])
-    loss = temporal_transition_self_distillation_ce_loss(
-        model,
-        predicted,
-        tokens,
-        target_mask,
-        eos_token_id=1,
-        pad_token_id=0,
-    )
-    loss.backward()
-    assert predicted.grad.abs().sum() > 0
     assert model.lm_head.weight.grad is None
 
 
@@ -373,49 +353,6 @@ def test_kl_variant_lambda_zeroes_reproduce_hidden_transition_total():
         predictor=predictor,
         lambda_transition=1.0,
         lambda_kl=0.0,
-        lambda_ce=0.0,
     )
     assert hidden_kl.transition_kl is not None
-    assert hidden_kl.transition_ce is not None
     assert torch.equal(hidden.total, hidden_kl.total)
-
-
-@torch.no_grad()
-def test_kl_variant_lambda_ce_adds_auxiliary_loss():
-    torch.manual_seed(14)
-    model = make_model()
-    predictor = LatentTransitionPredictor(8)
-    tokens = torch.tensor([[2, 3, 4, 1, 0]])
-    target_mask = torch.tensor([[True, True, True, False]])
-    output = model(tokens)
-    without_ce = compute_loss(
-        variant="memory_tape_hidden_transition_kl",
-        model=model,
-        output=output,
-        tokens=tokens,
-        target_mask=target_mask,
-        pad_token_id=0,
-        eos_token_id=1,
-        predictor=predictor,
-        lambda_transition=1.0,
-        lambda_kl=0.0,
-        lambda_ce=0.0,
-    )
-    with_ce = compute_loss(
-        variant="memory_tape_hidden_transition_kl",
-        model=model,
-        output=output,
-        tokens=tokens,
-        target_mask=target_mask,
-        pad_token_id=0,
-        eos_token_id=1,
-        predictor=predictor,
-        lambda_transition=1.0,
-        lambda_kl=0.0,
-        lambda_ce=0.5,
-    )
-    assert with_ce.transition_ce is not None
-    assert torch.allclose(
-        with_ce.total,
-        without_ce.total + 0.5 * with_ce.transition_ce,
-    )

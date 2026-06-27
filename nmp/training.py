@@ -7,7 +7,11 @@ import torch
 
 from .artifacts import append_jsonl, prepare_run
 from .checkpoint import load_checkpoint, restore_checkpoint, save_checkpoint
-from .config import ExperimentConfig, transition_target_for_variant
+from .config import (
+    ExperimentConfig,
+    active_objective_metadata,
+    transition_target_for_variant,
+)
 from .data import (
     StatefulBatchStream,
     load_corpora,
@@ -106,14 +110,10 @@ def train_experiment(
             "event": "run_start" if step == 0 else "run_resume",
             "step": step,
             "variant": config.model.variant,
-            "transition_target": transition_target_for_variant(
+            **active_objective_metadata(
                 config.model.variant,
                 config.objective.transition,
             ),
-            "transition_horizon": config.objective.transition.horizon,
-            "lambda_transition": config.objective.transition.lambda_transition,
-            "lambda_kl": config.objective.transition.lambda_kl,
-            "lambda_ce": config.objective.transition.lambda_ce,
             "ntp_pass_weights": config.objective.ntp_pass_weights,
             "device": str(device),
             "effective_batch_size": config.training.effective_batch_size,
@@ -174,7 +174,6 @@ def train_experiment(
                     predictor=runtime_predictor,
                     lambda_transition=config.objective.transition.lambda_transition,
                     lambda_kl=config.objective.transition.lambda_kl,
-                    lambda_ce=config.objective.transition.lambda_ce,
                     transition_horizon=config.objective.transition.horizon,
                     transition_target=transition_target_for_variant(
                         config.model.variant,
@@ -210,10 +209,6 @@ def train_experiment(
                     accumulated["transition_kl_loss"] += metrics[
                         "transition_kl_loss"
                     ]
-                if metrics["transition_ce_loss"] is not None:
-                    accumulated["transition_ce_loss"] += metrics[
-                        "transition_ce_loss"
-                    ]
 
         if scaler is not None:
             scaler.unscale_(optimizer)
@@ -239,8 +234,6 @@ def train_experiment(
             accumulated["transition_prediction_loss"] /= divisor
         if accumulated["transition_kl_loss"] is not None:
             accumulated["transition_kl_loss"] /= divisor
-        if accumulated["transition_ce_loss"] is not None:
-            accumulated["transition_ce_loss"] /= divisor
 
         if step % config.training.log_interval == 0 or step == 1:
             synchronize(device)

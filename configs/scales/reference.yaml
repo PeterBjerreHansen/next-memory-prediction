@@ -26,7 +26,6 @@ objective:
     target: null
     lambda_transition: 1.0
     lambda_kl: 1.0
-    lambda_ce: 0.0
     projection_factor: 1.3
 training:
   train_steps: 100000

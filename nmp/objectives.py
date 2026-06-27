@@ -27,7 +27,6 @@ class LossBreakdown:
     ntp_pass_weights: tuple[float, ...]
     transition_prediction: torch.Tensor | None
     transition_kl: torch.Tensor | None
-    transition_ce: torch.Tensor | None
     transition_target: str | None
 
     def detached_metrics(self) -> dict[str, object]:
@@ -46,11 +45,6 @@ class LossBreakdown:
                 None
                 if self.transition_kl is None
                 else float(self.transition_kl.detach().cpu())
-            ),
-            "transition_ce_loss": (
-                None
-                if self.transition_ce is None
-                else float(self.transition_ce.detach().cpu())
             ),
             "transition_target": self.transition_target,
         }
@@ -224,36 +218,6 @@ def temporal_transition_self_distillation_kl_loss(
     return (kl_per_token * weights).sum() / weights.sum().clamp_min(1.0)
 
 
-def temporal_transition_self_distillation_ce_loss(
-    model: MemoryTapeTransformer,
-    predicted_latent: torch.Tensor,
-    tokens: torch.Tensor,
-    target_mask: torch.Tensor | None,
-    *,
-    eos_token_id: int,
-    pad_token_id: int,
-) -> torch.Tensor:
-    if predicted_latent.size(1) < 2:
-        return predicted_latent.sum() * 0.0
-    student_inputs = predicted_latent[:, :-1, :]
-    student = F.linear(student_inputs, model.lm_head.weight.detach())
-    targets = tokens[:, 2:]
-    valid = temporal_transition_kl_mask(
-        tokens,
-        target_mask,
-        eos_token_id=eos_token_id,
-        pad_token_id=pad_token_id,
-    )
-    if not bool(valid.any()):
-        return student.sum() * 0.0
-    targets = targets.masked_fill(~valid, -100)
-    return F.cross_entropy(
-        student.reshape(-1, student.size(-1)),
-        targets.reshape(-1),
-        ignore_index=-100,
-    )
-
-
 def compute_loss(
     *,
     variant: str,
@@ -266,7 +230,6 @@ def compute_loss(
     predictor: LatentTransitionPredictor | None = None,
     lambda_transition: float = 1.0,
     lambda_kl: float = 1.0,
-    lambda_ce: float = 0.0,
     transition_horizon: int = 1,
     transition_target: str | None = None,
     ntp_pass_weights: list[float] | tuple[float, ...] | None = None,
@@ -292,7 +255,6 @@ def compute_loss(
             ntp_pass_weights=(1.0,),
             transition_prediction=None,
             transition_kl=None,
-            transition_ce=None,
             transition_target=None,
         )
 
@@ -321,7 +283,6 @@ def compute_loss(
     ).sum()
     transition_loss = None
     transition_kl_loss = None
-    transition_ce_loss = None
     transition_target = transition_target or transition_target_for_variant(variant)
     total = ntp_loss
     if variant in TRANSITION_VARIANTS:
@@ -359,15 +320,6 @@ def compute_loss(
                 pad_token_id=pad_token_id,
             )
             total = total + lambda_kl * transition_kl_loss
-            transition_ce_loss = temporal_transition_self_distillation_ce_loss(
-                model,
-                predicted_latent,
-                tokens,
-                target_mask,
-                eos_token_id=eos_token_id,
-                pad_token_id=pad_token_id,
-            )
-            total = total + lambda_ce * transition_ce_loss
     elif variant != "memory_tape_ntp":
         raise ValueError(f"unknown variant: {variant}")
 
@@ -381,6 +333,5 @@ def compute_loss(
         ),
         transition_prediction=transition_loss,
         transition_kl=transition_kl_loss,
-        transition_ce=transition_ce_loss,
         transition_target=transition_target,
     )

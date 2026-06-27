@@ -41,7 +41,6 @@ def parse_args(argv=None):
     )
     parser.add_argument("--lambda-transition", type=float)
     parser.add_argument("--lambda-kl", type=float)
-    parser.add_argument("--lambda-ce", type=float)
     parser.add_argument("--transition-horizon", type=int)
     parser.add_argument("--transition-target", choices=("hidden", "memory"))
     parser.add_argument(
@@ -68,7 +67,6 @@ def validate_resume_args(args) -> None:
         "--variant": args.variant,
         "--lambda-transition": args.lambda_transition,
         "--lambda-kl": args.lambda_kl,
-        "--lambda-ce": args.lambda_ce,
         "--transition-horizon": args.transition_horizon,
         "--transition-target": args.transition_target,
         "--ntp-pass-weights": args.ntp_pass_weights,
@@ -111,8 +109,6 @@ def resolve_config(args) -> tuple[ExperimentConfig, Path]:
         config.objective.transition.lambda_transition = args.lambda_transition
     if args.lambda_kl is not None:
         config.objective.transition.lambda_kl = args.lambda_kl
-    if args.lambda_ce is not None:
-        config.objective.transition.lambda_ce = args.lambda_ce
     if args.transition_horizon is not None:
         config.objective.transition.horizon = args.transition_horizon
     if args.transition_target is not None:

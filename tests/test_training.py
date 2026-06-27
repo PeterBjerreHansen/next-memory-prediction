@@ -98,3 +98,76 @@ def test_training_logs_generated_accuracy_diagnostic(
     assert diagnostics[0]["accuracy_batches"] == 1
     assert diagnostics[0]["val_sequences"] == config.training.micro_batch_size
     assert "val_accuracy" in diagnostics[0]
+
+
+@pytest.mark.parametrize(
+    ("variant", "expected"),
+    [
+        (
+            "transformer_ntp",
+            {
+                "transition_target": None,
+                "transition_horizon": None,
+                "lambda_transition": None,
+                "lambda_kl": None,
+            },
+        ),
+        (
+            "memory_tape_ntp",
+            {
+                "transition_target": None,
+                "transition_horizon": None,
+                "lambda_transition": None,
+                "lambda_kl": None,
+            },
+        ),
+        (
+            "memory_tape_nmp",
+            {
+                "transition_target": "memory",
+                "transition_horizon": 1,
+                "lambda_transition": 1.0,
+                "lambda_kl": None,
+            },
+        ),
+        (
+            "memory_tape_hidden_transition",
+            {
+                "transition_target": "hidden",
+                "transition_horizon": 1,
+                "lambda_transition": 1.0,
+                "lambda_kl": None,
+            },
+        ),
+        (
+            "memory_tape_hidden_transition_kl",
+            {
+                "transition_target": "hidden",
+                "transition_horizon": 1,
+                "lambda_transition": 1.0,
+                "lambda_kl": 1.0,
+            },
+        ),
+    ],
+)
+def test_run_start_logs_only_active_objective_weights(
+    variant,
+    expected,
+    local_countdown_files,
+    tmp_path: Path,
+):
+    train_file, val_file = local_countdown_files
+    config = make_config(
+        variant,
+        train_file,
+        val_file,
+        train_steps=1,
+    )
+    run_dir = tmp_path / variant
+
+    train_experiment(config, run_dir=run_dir)
+
+    rows = read_jsonl(artifacts_for(run_dir).metrics_path)
+    run_start = next(row for row in rows if row["event"] == "run_start")
+    for key, value in expected.items():
+        assert run_start[key] == value

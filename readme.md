@@ -25,8 +25,7 @@ the model has extra compute steps before producing the solution.
    transition loss.
 5. `memory_tape_hidden_transition_kl`: hidden-state transition plus a
    NextLat-style self-distillation KL loss from actual hidden-state teacher
-   logits to predicted-hidden-state student logits, with optional CE on the
-   same student path via `objective.transition.lambda_ce`.
+   logits to predicted-hidden-state student logits.
 
 The transition objective remains the same teacher-forced one-step residual
 predictor:
@@ -38,8 +37,8 @@ predictor:
 NTP is masked on Countdown prompt and pause tokens. Solution tokens and EOS are
 supervised. Transition loss is masked only for transitions into EOS or padding.
 For the KL variant, the LM head is detached for the student logits, teacher
-logits are stop-gradient, and optional CE uses the predicted hidden state to
-predict the following solution token. The default CE weight is `0.0`.
+logits are stop-gradient, and `objective.transition.lambda_kl` weights the
+self-distillation term.
 
 ## Data
 
@@ -92,7 +91,7 @@ python -m nmp.cli.run_experiment \
 The manifests select checkpoints and transition weights by `final_pass_nll` with
 `mode: min`. Countdown accuracy is reported separately because exact generated
 solution accuracy is sparse early in training.
-Reports still include final-pass NLL, perplexity, transition loss, KL/CE
+Reports still include final-pass NLL, perplexity, transition loss, KL
 auxiliary loss diagnostics, throughput, representation diagnostics, generated
 samples, and linear probes.
 

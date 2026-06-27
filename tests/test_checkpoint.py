@@ -37,7 +37,6 @@ def test_checkpoint_config_uses_current_schema_exactly():
                 "transition": {
                     "horizon": 1,
                     "lambda_transition": 0.3,
-                    "lambda_ce": 0.2,
                     "target": "memory",
                     "projection_factor": 1.7,
                 },
@@ -52,7 +51,6 @@ def test_checkpoint_config_uses_current_schema_exactly():
     config = config_from_checkpoint(checkpoint)
 
     assert config.objective.transition.lambda_transition == 0.3
-    assert config.objective.transition.lambda_ce == 0.2
     assert config.objective.transition.horizon == 1
     assert config.objective.transition.projection_factor == 1.7
     assert config.model.memory.n_pass == 3

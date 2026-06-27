@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from .artifacts import artifacts_for, read_jsonl, write_json
 from .config import (
     TRANSITION_VARIANTS,
+    active_objective_metadata,
     load_config,
     transition_target_for_variant,
 )
@@ -158,9 +159,6 @@ def load_run_record(
     transition_kl_loss = best_validation.get("transition_kl_loss")
     if transition_kl_loss is None:
         transition_kl_loss = evaluation_loss.get("transition_kl_loss")
-    transition_ce_loss = best_validation.get("transition_ce_loss")
-    if transition_ce_loss is None:
-        transition_ce_loss = evaluation_loss.get("transition_ce_loss")
     parameters = evaluation.get("parameters", {})
     generation = evaluation.get("generation", {})
     generalization = evaluation.get("generalization", {})
@@ -183,19 +181,19 @@ def load_run_record(
     )
     if diagnostic_final_pass_nll is None and "protocol" not in evaluation:
         diagnostic_final_pass_nll = evaluation_loss.get("final_pass_nll")
+    objective_metadata = active_objective_metadata(
+        spec.variant,
+        config.objective.transition,
+    )
 
     return {
         "experiment": spec.experiment,
         "variant": spec.variant,
         "seed": spec.seed,
-        "lambda_transition": spec.lambda_transition,
-        "lambda_kl": config.objective.transition.lambda_kl,
-        "lambda_ce": config.objective.transition.lambda_ce,
-        "transition_horizon": config.objective.transition.horizon,
-        "transition_target": transition_target_for_variant(
-            spec.variant,
-            config.objective.transition,
-        ),
+        "lambda_transition": objective_metadata["lambda_transition"],
+        "lambda_kl": objective_metadata["lambda_kl"],
+        "transition_horizon": objective_metadata["transition_horizon"],
+        "transition_target": objective_metadata["transition_target"],
         "run_dir": str(run_dir),
         "best_checkpoint_final_pass_nll": final_pass_nll,
         "best_checkpoint_selection_metric": selection_metric,
@@ -266,9 +264,6 @@ def load_run_record(
         ),
         "transition_kl_loss": (
             None if transition_kl_loss is None else float(transition_kl_loss)
-        ),
-        "transition_ce_loss": (
-            None if transition_ce_loss is None else float(transition_ce_loss)
         ),
         "parameters_model": int(parameters.get("model", 0)),
         "parameters_training_only": int(parameters.get("training_only", 0)),
@@ -402,7 +397,6 @@ def summarize_conditions(
         "perplexity",
         "transition_prediction_loss",
         "transition_kl_loss",
-        "transition_ce_loss",
         "parameters_model",
         "parameters_training_only",
         "parameters_total_training",
@@ -422,7 +416,6 @@ def summarize_conditions(
             "variant": variant,
             "lambda_transition": lambda_transition,
             "lambda_kl": condition[0].get("lambda_kl"),
-            "lambda_ce": condition[0].get("lambda_ce"),
             "transition_horizon": condition[0].get("transition_horizon"),
             "transition_target": condition[0].get(
                 "transition_target",
@@ -659,8 +652,8 @@ def write_summary_markdown(
             "",
             "## Conditions",
             "",
-            "| Variant | Target | λ | KL λ | CE λ | NTP weights | Strict val | NextLat compat | Generalization | Final-pass NLL | Diagnostic NLL | Transition loss | KL loss | CE loss |",
-            "|---|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| Variant | Target | λ | KL λ | NTP weights | Strict val | NextLat compat | Generalization | Final-pass NLL | Diagnostic NLL | Transition loss | KL loss |",
+            "|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in condition_summary:
@@ -680,12 +673,6 @@ def write_summary_markdown(
             "—"
             if transition_kl is None
             else f"{transition_kl['mean']:.4f} ± {transition_kl['std']:.4f}"
-        )
-        transition_ce = row["transition_ce_loss"]
-        transition_ce_text = (
-            "—"
-            if transition_ce is None
-            else f"{transition_ce['mean']:.4f} ± {transition_ce['std']:.4f}"
         )
         weights = row.get("ntp_pass_weights")
         weights_text = (
@@ -719,19 +706,17 @@ def write_summary_markdown(
         )
         lambda_kl = row.get("lambda_kl")
         lambda_kl_text = "—" if lambda_kl is None else f"{lambda_kl:g}"
-        lambda_ce = row.get("lambda_ce")
-        lambda_ce_text = "—" if lambda_ce is None else f"{lambda_ce:g}"
         target_text = row.get("transition_target") or "—"
         lines.append(
             f"| `{row['variant']}` | {target_text} | {lambda_text} | "
-            f"{lambda_kl_text} | {lambda_ce_text} | {weights_text} | "
+            f"{lambda_kl_text} | {weights_text} | "
             f"{accuracy_text} | "
             f"{compat_text} | "
             f"{generalization_text} | "
             f"{row['final_pass_nll']['mean']:.4f} ± "
             f"{row['final_pass_nll']['std']:.4f} | "
             f"{diagnostic_text} | "
-            f"{transition_text} | {transition_kl_text} | {transition_ce_text} |"
+            f"{transition_text} | {transition_kl_text} |"
         )
     lines.extend(
         [
