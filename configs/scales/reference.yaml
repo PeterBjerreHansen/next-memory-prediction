@@ -41,10 +41,9 @@ training:
   compile: true
 evaluation:
   generation_prompts: 16
-  prompt_tokens: 32
-  generation_tokens: 17
+  accuracy_batches: null
   diagnostic_batches: 20
   probe_steps: 20000
   probe_batch_size: 256
-  checkpoint_metric: val_accuracy
-  checkpoint_mode: max
+  checkpoint_metric: final_pass_nll
+  checkpoint_mode: min

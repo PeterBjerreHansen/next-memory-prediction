@@ -63,14 +63,13 @@ def make_config(
             },
             "evaluation": {
                 "generation_prompts": 1,
-                "prompt_tokens": 4,
-                "generation_tokens": 2,
                 "diagnostic_batches": 1,
                 "probe_steps": 1,
                 "probe_batch_size": 2,
                 "probe_offsets": [1, 2],
-                "checkpoint_metric": "val_accuracy",
-                "checkpoint_mode": "max",
+                "accuracy_batches": None,
+                "checkpoint_metric": "final_pass_nll",
+                "checkpoint_mode": "min",
             },
         }
     )

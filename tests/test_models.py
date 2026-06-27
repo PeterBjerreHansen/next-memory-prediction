@@ -183,6 +183,39 @@ def test_first_generated_token_matches_between_inference_modes():
     assert torch.equal(exact, approximate)
 
 
+@pytest.mark.parametrize("model_kind", ["transformer", "memory"])
+def test_generate_rejects_nonpositive_temperature(model_kind):
+    if model_kind == "transformer":
+        model = CausalTransformer(
+            TransformerConfig(
+                block_size=4,
+                vocab_size=11,
+                n_layer=1,
+                n_head=1,
+                n_embd=4,
+            )
+        )
+    else:
+        model = MemoryTapeTransformer(
+            MemoryTapeConfig(
+                block_size=4,
+                vocab_size=11,
+                n_layer=1,
+                n_head=1,
+                n_embd=4,
+                n_pass=2,
+            )
+        )
+
+    with pytest.raises(ValueError, match="temperature"):
+        model.generate(
+            torch.tensor([[1, 2]]),
+            1,
+            temperature=0.0,
+            do_sample=False,
+        )
+
+
 def test_final_pass_generation_has_no_memory_source_flag():
     parameters = inspect.signature(MemoryTapeTransformer.generate).parameters
     assert "cache_source" not in parameters

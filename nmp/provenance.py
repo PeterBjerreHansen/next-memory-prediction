@@ -27,8 +27,9 @@ def provenance_manifest() -> dict[str, Any]:
             ],
             "paper": COUNTDOWN_PAPER,
             "local_representation": (
-                "custom atomic integer tokenizer, generator, and evaluator "
-                "implemented in nmp/countdown.py"
+                "custom atomic integer tokenizer, generator, strict multiset "
+                "evaluator, and NextLat-compatible loose evaluator implemented "
+                "in nmp/countdown.py"
             ),
         },
     }

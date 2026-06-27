@@ -85,7 +85,9 @@ Run a dry smoke expansion:
 bash scripts/run_development_matrix.sh runs --seeds 0 --dry-run
 ```
 
-The manifests select transition weights by `val_accuracy` with `mode: max`.
+The manifests select checkpoints and transition weights by `final_pass_nll` with
+`mode: min`. Countdown accuracy is reported separately because exact generated
+solution accuracy is sparse early in training.
 Reports still include final-pass NLL, perplexity, transition loss, KL/CE
 auxiliary loss diagnostics, throughput, representation diagnostics, generated
 samples, and linear probes.
@@ -98,6 +100,8 @@ tracking available operands as a multiset, and requiring the final equation to
 reach the target. This strict multiset metric is the primary `val_accuracy`.
 Runs also report `val_nextlat_compat_accuracy`, which reproduces the looser
 upstream evaluator by using set membership and not consuming operands.
+Final evaluation uses `evaluation.accuracy_batches`; the default `null` walks
+the full validation and held-out-target corpora once.
 
 Validation metrics include:
 

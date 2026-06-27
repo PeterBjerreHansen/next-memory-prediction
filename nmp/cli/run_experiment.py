@@ -195,6 +195,7 @@ def main(argv=None):
             ),
             selection_metric=plan.selection.metric,
             selection_mode=plan.selection.mode,
+            select_lambda_per_variant=plan.selection.select_lambda_per_variant,
         )
 
 

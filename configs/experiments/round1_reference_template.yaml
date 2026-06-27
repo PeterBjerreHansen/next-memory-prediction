@@ -4,8 +4,8 @@ runs_root: runs
 selection_file: round1_development/summary/selected_lambdas.json
 
 selection:
-  metric: val_accuracy
-  mode: max
+  metric: final_pass_nll
+  mode: min
   select_lambda_per_variant: false
 
 shared_overrides:

@@ -27,19 +27,22 @@ def main(argv=None):
         output_dir = args.output_dir or root / "summary"
         selection_metric = plan.selection.metric
         selection_mode = plan.selection.mode
+        select_lambda_per_variant = plan.selection.select_lambda_per_variant
     else:
         expanded_runs = args.expanded_runs
         output_dir = args.output_dir
         if output_dir is None:
             output_dir = expanded_runs.parent / "summary"
-        selection_metric = "val_accuracy"
-        selection_mode = "max"
+        selection_metric = "final_pass_nll"
+        selection_mode = "min"
+        select_lambda_per_variant = True
     result = summarize_experiment(
         expanded_runs=expanded_runs,
         output_dir=output_dir,
         selection_file=args.selection_file,
         selection_metric=selection_metric,
         selection_mode=selection_mode,
+        select_lambda_per_variant=select_lambda_per_variant,
     )
     print(
         json.dumps(

@@ -235,9 +235,27 @@ def sequential_batches(
     batch_size: int,
     block_size: int,
     num_pause_tokens: int,
-    num_batches: int,
+    num_batches: int | None,
 ) -> list[SequenceBatch]:
+    if num_batches is not None and num_batches < 1:
+        raise ValueError("num_batches must be positive or None")
     batches = []
+    if num_batches is None:
+        for cursor in range(0, len(corpus), batch_size):
+            rows = [
+                corpus[index]
+                for index in range(cursor, min(cursor + batch_size, len(corpus)))
+            ]
+            batches.append(
+                encode_sequences(
+                    rows,
+                    tokenizer=tokenizer,
+                    block_size=block_size,
+                    num_pause_tokens=num_pause_tokens,
+                )
+            )
+        return batches
+
     cursor = 0
     for _ in range(num_batches):
         rows = [corpus[(cursor + offset) % len(corpus)] for offset in range(batch_size)]

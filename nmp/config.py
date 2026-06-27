@@ -204,20 +204,17 @@ class TrainingConfig:
 @dataclass(kw_only=True)
 class EvaluationConfig:
     generation_prompts: int = 4
-    prompt_tokens: int = 32
-    generation_tokens: int = 32
     diagnostic_batches: int = 8
+    accuracy_batches: int | None = None
     probe_steps: int = 1000
     probe_batch_size: int = 64
     probe_offsets: list[int] = field(default_factory=lambda: list(range(1, 21)))
-    checkpoint_metric: str = "val_accuracy"
-    checkpoint_mode: str = "max"
+    checkpoint_metric: str = "final_pass_nll"
+    checkpoint_mode: str = "min"
 
     def validate(self) -> None:
         if min(
             self.generation_prompts,
-            self.prompt_tokens,
-            self.generation_tokens,
             self.diagnostic_batches,
             self.probe_steps,
             self.probe_batch_size,
@@ -225,6 +222,8 @@ class EvaluationConfig:
             raise ValueError("evaluation counts must be positive")
         if not self.probe_offsets or min(self.probe_offsets) < 1:
             raise ValueError("probe_offsets must contain positive integers")
+        if self.accuracy_batches is not None and self.accuracy_batches < 1:
+            raise ValueError("accuracy_batches must be positive or null")
         if not self.checkpoint_metric:
             raise ValueError("checkpoint_metric must be non-empty")
         if self.checkpoint_mode not in {"min", "max"}:

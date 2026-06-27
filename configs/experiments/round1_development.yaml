@@ -3,8 +3,8 @@ base_config: configs/scales/development.yaml
 runs_root: runs
 
 selection:
-  metric: val_accuracy
-  mode: max
+  metric: final_pass_nll
+  mode: min
   select_lambda_per_variant: true
 
 shared_overrides:

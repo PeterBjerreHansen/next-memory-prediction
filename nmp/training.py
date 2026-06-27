@@ -26,6 +26,10 @@ from .runtime import (
 )
 
 
+def _checkpoint_metric_requires_accuracy(metric: str) -> bool:
+    return metric.startswith("val_")
+
+
 def _optimizer_to(optimizer, device: torch.device) -> None:
     for state in optimizer.state.values():
         for key, value in list(state.items()):
@@ -263,6 +267,9 @@ def train_experiment(
                 batches=validation_batches,
                 tokenizer=tokenizer,
                 device=device,
+                include_accuracy=_checkpoint_metric_requires_accuracy(
+                    config.evaluation.checkpoint_metric
+                ),
             )
             append_jsonl(
                 artifacts.metrics_path,

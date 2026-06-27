@@ -117,8 +117,8 @@ def _metric_with_fallback(
 def load_run_record(
     spec: ExpandedRunSpec,
     *,
-    selection_metric: str = "val_accuracy",
-    selection_mode: str = "max",
+    selection_metric: str = "final_pass_nll",
+    selection_mode: str = "min",
 ) -> dict[str, Any]:
     run_dir = Path(spec.run_dir)
     _require_run_artifacts(run_dir)
@@ -356,6 +356,21 @@ def selected_condition_records(
         or record["variant"] not in selected_lambdas
         or record["lambda_transition"] == selected_lambdas[record["variant"]]
     ]
+
+
+def has_unselected_lambda_sweeps(
+    records: list[dict[str, Any]],
+    selected_lambdas: dict[str, float],
+) -> bool:
+    if selected_lambdas:
+        return False
+    by_variant: dict[str, set[float]] = {}
+    for record in records:
+        if record["lambda_transition"] is not None:
+            by_variant.setdefault(record["variant"], set()).add(
+                float(record["lambda_transition"])
+            )
+    return any(len(values) > 1 for values in by_variant.values())
 
 
 def _scalar_statistics(values: list[float]) -> dict[str, float]:
@@ -890,7 +905,10 @@ def _selected_lambdas_from_expanded_records(
     *,
     selection_metric: str,
     selection_mode: str,
+    select_lambda_per_variant: bool,
 ) -> dict[str, float]:
+    if not select_lambda_per_variant:
+        return {}
     by_variant: dict[str, set[float]] = {}
     for record in records:
         value = record["lambda_transition"]
@@ -914,8 +932,9 @@ def summarize_experiment(
     expanded_runs: str | Path,
     output_dir: str | Path,
     selection_file: str | Path | None = None,
-    selection_metric: str = "val_accuracy",
-    selection_mode: str = "max",
+    selection_metric: str = "final_pass_nll",
+    selection_mode: str = "min",
+    select_lambda_per_variant: bool = True,
 ) -> dict[str, Any]:
     specs = load_expanded_run_specs(expanded_runs)
     if not specs:
@@ -932,6 +951,7 @@ def summarize_experiment(
         records,
         selection_metric=selection_metric,
         selection_mode=selection_mode,
+        select_lambda_per_variant=select_lambda_per_variant,
     )
     if selection_file is not None and not selected_lambdas:
         selected_lambdas = load_selected_lambdas(selection_file)
@@ -946,7 +966,11 @@ def summarize_experiment(
         variant_order=variant_order,
     )
     probe_summary = summarize_probes(selected_records)
-    comparisons = paired_comparisons(records, selected_lambdas)
+    comparisons = (
+        []
+        if has_unselected_lambda_sweeps(records, selected_lambdas)
+        else paired_comparisons(records, selected_lambdas)
+    )
     experiment_name = specs[0].experiment
     result = {
         "experiment": experiment_name,
@@ -958,6 +982,7 @@ def summarize_experiment(
         ),
         "selection_metric": selection_metric,
         "selection_mode": selection_mode,
+        "select_lambda_per_variant": select_lambda_per_variant,
         "selected_lambdas": selected_lambdas,
         "runs": records,
         "all_condition_summary": all_condition_summary,

@@ -47,6 +47,7 @@ def evaluate_batches(
     tokenizer: CountdownTokenizer,
     device: torch.device,
     accuracy_prefix: str = "val",
+    include_accuracy: bool = False,
 ) -> dict[str, Any]:
     model.eval()
     if predictor is not None:
@@ -193,7 +194,11 @@ def evaluate_batches(
             result["transition_ce_loss"] = transition_ce_loss
             result["transition_ce_count"] = transition_ce_count
             result["loss"] += lambda_ce * transition_ce_loss
-    if getattr(tokenizer, "task", None) == "countdown" and hasattr(config, "data"):
+    if (
+        include_accuracy
+        and getattr(tokenizer, "task", None) == "countdown"
+        and hasattr(config, "data")
+    ):
         result.update(
             countdown_accuracy_for_batches(
                 config=config,
@@ -205,6 +210,17 @@ def evaluate_batches(
             )
         )
     return result
+
+
+def _countdown_accuracy_batches(config, corpus, tokenizer):
+    return sequential_batches(
+        corpus,
+        tokenizer,
+        batch_size=config.training.micro_batch_size,
+        block_size=config.model.block_size,
+        num_pause_tokens=config.data.num_pause_tokens,
+        num_batches=config.evaluation.accuracy_batches,
+    )
 
 
 @torch.no_grad()
@@ -491,7 +507,18 @@ def evaluate_run(
         batches=loss_batches,
         tokenizer=tokenizer,
         device=device,
+        include_accuracy=False,
     )
+    accuracy_batches = _countdown_accuracy_batches(config, val_corpus, tokenizer)
+    accuracy_metrics = countdown_accuracy_for_batches(
+        config=config,
+        model=model,
+        batches=accuracy_batches,
+        tokenizer=tokenizer,
+        device=device,
+        prefix="val",
+    )
+    loss_metrics.update(accuracy_metrics)
     diagnostic_batches = sequential_batches(
         val_corpus,
         tokenizer,
@@ -507,6 +534,7 @@ def evaluate_run(
         batches=diagnostic_batches,
         tokenizer=tokenizer,
         device=device,
+        include_accuracy=False,
     )
     representations = representation_diagnostics(
         config=config,
@@ -525,13 +553,10 @@ def evaluate_run(
     generalization = None
     generalization_corpus = load_generalization_corpus(config.data)
     if generalization_corpus is not None:
-        generalization_batches = sequential_batches(
+        generalization_batches = _countdown_accuracy_batches(
+            config,
             generalization_corpus,
             tokenizer,
-            batch_size=config.training.micro_batch_size,
-            block_size=config.model.block_size,
-            num_pause_tokens=config.data.num_pause_tokens,
-            num_batches=config.evaluation.diagnostic_batches,
         )
         generalization = countdown_accuracy_for_batches(
             config=config,
@@ -558,6 +583,9 @@ def evaluate_run(
             "config_source": "checkpoint",
             "loss_source": "training.eval_batches",
             "loss_batches": config.training.eval_batches,
+            "accuracy_source": "evaluation.accuracy_batches",
+            "accuracy_batches": config.evaluation.accuracy_batches,
+            "accuracy_sequences": loss_metrics.get("val_sequences"),
             "diagnostic_source": "evaluation.diagnostic_batches",
             "diagnostic_batches": config.evaluation.diagnostic_batches,
             "checkpoint_selection_metric": config.evaluation.checkpoint_metric,

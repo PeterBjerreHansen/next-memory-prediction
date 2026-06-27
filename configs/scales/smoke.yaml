@@ -41,11 +41,10 @@ training:
   compile: false
 evaluation:
   generation_prompts: 2
-  prompt_tokens: 16
-  generation_tokens: 17
+  accuracy_batches: null
   diagnostic_batches: 2
   probe_steps: 10
   probe_batch_size: 2
   probe_offsets: [1, 2, 4, 8, 16, 20]
-  checkpoint_metric: val_accuracy
-  checkpoint_mode: max
+  checkpoint_metric: final_pass_nll
+  checkpoint_mode: min

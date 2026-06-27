@@ -8,9 +8,6 @@ import re
 from typing import Sequence
 
 
-COUNTDOWN_OPERATORS = ("*", "/", "+", "-", "=", ",", "|")
-
-
 @dataclass(frozen=True)
 class CountdownCheck:
     correct: bool

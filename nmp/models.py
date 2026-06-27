@@ -209,6 +209,8 @@ class CausalTransformer(nn.Module):
     ) -> torch.Tensor:
         if inference_mode != "recompute":
             raise ValueError("CausalTransformer only supports recompute inference")
+        if temperature <= 0:
+            raise ValueError("temperature must be positive")
         for _ in range(max_new_tokens):
             ids_cond = ids[:, -self.config.block_size :]
             logits = self(ids_cond).logits[:, -1, :] / temperature
@@ -444,6 +446,8 @@ class MemoryTapeTransformer(nn.Module):
         inference_mode: str = "recompute",
         eos_token_id: int | None = None,
     ) -> torch.Tensor:
+        if temperature <= 0:
+            raise ValueError("temperature must be positive")
         if inference_mode == "recompute":
             for _ in range(max_new_tokens):
                 ids_cond = ids[:, -self.config.block_size :]

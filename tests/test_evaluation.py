@@ -246,8 +246,12 @@ def test_evaluate_run_uses_training_eval_batches_for_reported_loss(
         val_file,
         train_steps=1,
     )
+    config.data.generalization_file = str(
+        train_file.parent / "countdown_generalization.txt"
+    )
     config.training.eval_batches = 2
     config.evaluation.diagnostic_batches = 1
+    config.evaluation.accuracy_batches = None
     run_dir = tmp_path / "run"
     train_experiment(config, run_dir=run_dir)
 
@@ -259,6 +263,11 @@ def test_evaluate_run_uses_training_eval_batches_for_reported_loss(
     assert protocol["config_source"] == "checkpoint"
     assert protocol["loss_source"] == "training.eval_batches"
     assert protocol["loss_batches"] == 2
+    assert protocol["accuracy_source"] == "evaluation.accuracy_batches"
+    assert protocol["accuracy_batches"] is None
+    assert protocol["accuracy_sequences"] == 8
     assert protocol["diagnostic_batches"] == 1
     assert loss["ntp_tokens"] > diagnostic_loss["ntp_tokens"]
+    assert loss["val_sequences"] == 8
+    assert result["generalization"]["generalization_sequences"] == 1
     assert artifacts_for(run_dir).evaluation_path.exists()

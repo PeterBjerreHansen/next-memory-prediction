@@ -43,6 +43,21 @@ def _synthetic_score(variant: str, lambda_transition: float | None, seed: int):
     return values[lambda_transition][seed]
 
 
+def _synthetic_nll(variant: str, lambda_transition: float | None, seed: int):
+    if variant == "transformer_ntp":
+        return 3.0 + seed * 0.01
+    if variant == "memory_tape_ntp":
+        return 2.8 + seed * 0.01
+    if variant == "memory_tape_nmp":
+        values = {0.1: 3.2, 0.3: 2.0, 1.0: 2.5, 3.0: 2.9}
+        return values[lambda_transition] + seed * 0.01
+    if variant == "memory_tape_hidden_transition_kl":
+        values = {0.1: 2.7, 0.3: 1.9, 1.0: 2.2, 3.0: 2.6}
+        return values[lambda_transition] + seed * 0.01
+    values = {0.1: 2.4, 0.3: 2.2, 1.0: 1.8, 3.0: 2.7}
+    return values[lambda_transition] + seed * 0.01
+
+
 def _write_synthetic_run(
     run_dir: Path,
     *,
@@ -50,8 +65,8 @@ def _write_synthetic_run(
     seed: int,
     lambda_transition: float | None,
     best_score: float,
+    best_nll: float,
 ) -> None:
-    best_nll = 3.0 + seed * 0.01
     config = ExperimentConfig.from_dict(
         {
             "name": "synthetic",
@@ -127,10 +142,13 @@ def _write_synthetic_run(
                 "config_source": "checkpoint",
                 "loss_source": "training.eval_batches",
                 "loss_batches": 20,
+                "accuracy_source": "evaluation.accuracy_batches",
+                "accuracy_batches": None,
+                "accuracy_sequences": 10_000,
                 "diagnostic_source": "evaluation.diagnostic_batches",
                 "diagnostic_batches": 8,
-                "checkpoint_selection_metric": "val_accuracy",
-                "checkpoint_selection_mode": "max",
+                "checkpoint_selection_metric": "final_pass_nll",
+                "checkpoint_selection_mode": "min",
             },
             "loss": {
                 "final_pass_nll": best_nll + 0.05,
@@ -204,7 +222,7 @@ def _write_synthetic_run(
         )
 
 
-def test_development_summary_selects_mean_best_checkpoint_accuracy(tmp_path: Path):
+def test_development_summary_selects_mean_best_checkpoint_nll(tmp_path: Path):
     runs_root = tmp_path / "runs"
     plan = load_experiment_plan("configs/experiments/round1_development.yaml")
     expanded = expand_plan(plan, runs_root=runs_root)
@@ -222,14 +240,19 @@ def test_development_summary_selects_mean_best_checkpoint_accuracy(tmp_path: Pat
                 spec.lambda_transition,
                 spec.seed,
             ),
+            best_nll=_synthetic_nll(
+                spec.variant,
+                spec.lambda_transition,
+                spec.seed,
+            ),
         )
 
     output_dir = tmp_path / "summary"
     result = summarize_experiment(
         expanded_runs=expanded_path,
         output_dir=output_dir,
-        selection_metric="val_accuracy",
-        selection_mode="max",
+        selection_metric="final_pass_nll",
+        selection_mode="min",
     )
 
     assert result["completed_runs"] == 14
@@ -250,7 +273,7 @@ def test_development_summary_selects_mean_best_checkpoint_accuracy(tmp_path: Pat
     ):
         assert (output_dir / filename).exists()
     payload = json.loads((output_dir / "summary.json").read_text())
-    assert payload["selection_criterion"].startswith("max mean")
+    assert payload["selection_criterion"].startswith("min mean")
     transformer_run = next(
         row for row in payload["runs"] if row["variant"] == "transformer_ntp"
     )
@@ -276,3 +299,41 @@ def test_reference_manifest_has_four_runs_for_seed_zero():
         },
     )
     assert len(expanded) == 5
+
+
+def test_summary_can_leave_lambda_sweeps_unselected(tmp_path: Path):
+    runs_root = tmp_path / "runs"
+    plan = load_experiment_plan("configs/experiments/round1_development.yaml")
+    expanded = expand_plan(plan, runs_root=runs_root)
+    expanded_path = tmp_path / "expanded_runs.jsonl"
+    write_expanded_runs(expanded_path, expanded)
+    for run in expanded:
+        spec = run.spec
+        _write_synthetic_run(
+            spec.run_dir,
+            variant=spec.variant,
+            seed=spec.seed,
+            lambda_transition=spec.lambda_transition,
+            best_score=_synthetic_score(
+                spec.variant,
+                spec.lambda_transition,
+                spec.seed,
+            ),
+            best_nll=_synthetic_nll(
+                spec.variant,
+                spec.lambda_transition,
+                spec.seed,
+            ),
+        )
+
+    result = summarize_experiment(
+        expanded_runs=expanded_path,
+        output_dir=tmp_path / "summary",
+        selection_metric="final_pass_nll",
+        selection_mode="min",
+        select_lambda_per_variant=False,
+    )
+
+    assert result["selected_lambdas"] == {}
+    assert len(result["condition_summary"]) == 14
+    assert result["paired_comparisons"] == []
