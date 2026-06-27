@@ -26,20 +26,18 @@ def test_checkpoint_config_uses_current_schema_exactly():
             "name": "current",
             "seed": 0,
             "model": {
-                "variant": "memory_tape_nmp",
+                "architecture": "memory_tape",
                 "block_size": 8,
                 "n_layer": 1,
                 "n_head": 1,
                 "n_embd": 8,
                 "memory": {"n_pass": 3},
             },
+            "data": {"train_file": "train.txt", "val_file": "val.txt"},
             "objective": {
-                "transition": {
-                    "horizon": 1,
-                    "lambda_transition": 0.3,
-                    "target": "memory",
-                    "projection_factor": 1.7,
-                },
+                "transition": "memory",
+                "lambda_transition": 0.3,
+                "projection_factor": 1.7,
             },
             "training": {
                 "train_steps": 1,
@@ -50,7 +48,7 @@ def test_checkpoint_config_uses_current_schema_exactly():
 
     config = config_from_checkpoint(checkpoint)
 
-    assert config.objective.transition.lambda_transition == 0.3
-    assert config.objective.transition.horizon == 1
-    assert config.objective.transition.projection_factor == 1.7
+    assert config.objective.transition == "memory"
+    assert config.objective.lambda_transition == 0.3
+    assert config.objective.projection_factor == 1.7
     assert config.model.memory.n_pass == 3

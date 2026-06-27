@@ -107,7 +107,6 @@ def test_training_logs_generated_accuracy_diagnostic(
             "transformer_ntp",
             {
                 "transition_target": None,
-                "transition_horizon": None,
                 "lambda_transition": None,
                 "lambda_kl": None,
             },
@@ -116,7 +115,6 @@ def test_training_logs_generated_accuracy_diagnostic(
             "memory_tape_ntp",
             {
                 "transition_target": None,
-                "transition_horizon": None,
                 "lambda_transition": None,
                 "lambda_kl": None,
             },
@@ -125,7 +123,6 @@ def test_training_logs_generated_accuracy_diagnostic(
             "memory_tape_nmp",
             {
                 "transition_target": "memory",
-                "transition_horizon": 1,
                 "lambda_transition": 1.0,
                 "lambda_kl": None,
             },
@@ -134,7 +131,6 @@ def test_training_logs_generated_accuracy_diagnostic(
             "memory_tape_hidden_transition",
             {
                 "transition_target": "hidden",
-                "transition_horizon": 1,
                 "lambda_transition": 1.0,
                 "lambda_kl": None,
             },
@@ -143,7 +139,6 @@ def test_training_logs_generated_accuracy_diagnostic(
             "memory_tape_hidden_transition_kl",
             {
                 "transition_target": "hidden",
-                "transition_horizon": 1,
                 "lambda_transition": 1.0,
                 "lambda_kl": 1.0,
             },

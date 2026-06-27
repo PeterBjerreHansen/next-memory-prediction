@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .config import ExperimentConfig, TRANSITION_VARIANTS
+from .config import ExperimentConfig, TRANSITION_OBJECTIVES
 from .models import (
     CausalTransformer,
     LatentTransitionPredictor,
@@ -17,9 +17,9 @@ def build_model(
 ) -> tuple[
     CausalTransformer | MemoryTapeTransformer,
     LatentTransitionPredictor | None,
-]:
+    ]:
     model_config = config.model
-    if model_config.variant == "transformer_ntp":
+    if model_config.architecture == "transformer":
         model = CausalTransformer(
             TransformerConfig(
                 block_size=model_config.block_size,
@@ -44,9 +44,9 @@ def build_model(
     predictor = (
         LatentTransitionPredictor(
             model_config.n_embd,
-            projection_factor=config.objective.transition.projection_factor,
+            projection_factor=config.objective.projection_factor,
         )
-        if model_config.variant in TRANSITION_VARIANTS
+        if config.objective.transition in TRANSITION_OBJECTIVES
         else None
     )
     return model, predictor

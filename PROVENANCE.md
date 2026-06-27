@@ -21,10 +21,10 @@ The Countdown task setup is adapted from:
   in `nmp/countdown.py`.
 
 Local extensions include structured outputs, configurable MemoryTape NTP pass
-weights, padding-aware objectives, explicit transition horizon/target and
-KL/CE weights, memory- and hidden-state transition objectives, NextLat-style
-hidden-state self-distillation KL, Countdown target masking, experiment
-configuration, checkpointing, diagnostics, probing, and reporting.
+weights, padding-aware objectives, horizon-one memory- and hidden-state
+transition objectives, NextLat-style hidden-state self-distillation KL,
+Countdown target masking, experiment configuration, checkpointing, diagnostics,
+and reporting.
 
 Research-paper references are listed in `documents/references.md`; paper PDFs
 are intentionally not committed.

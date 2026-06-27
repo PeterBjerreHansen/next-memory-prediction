@@ -97,52 +97,6 @@ def plot_training(run_dir: str | Path) -> Path | None:
     return output
 
 
-def plot_probes(run_dir: str | Path) -> Path | None:
-    artifacts = artifacts_for(run_dir)
-    rows = [
-        row
-        for row in read_jsonl(artifacts.probe_metrics_path)
-        if row.get("event") == "probe_validation"
-    ]
-    if not rows:
-        return None
-    figure, axes = plt.subplots(1, 2, figsize=(11, 4))
-    sources = sorted({row["source"] for row in rows})
-    for source in sources:
-        selected = sorted(
-            (row for row in rows if row["source"] == source),
-            key=lambda row: row["offset"],
-        )
-        offsets = [row["offset"] for row in selected]
-        axes[0].plot(
-            offsets,
-            [row["cross_entropy"] for row in selected],
-            marker="o",
-            label=source,
-        )
-        axes[1].plot(
-            offsets,
-            [row["accuracy"] for row in selected],
-            marker="o",
-            label=source,
-        )
-    axes[0].set_title("Probe cross-entropy")
-    axes[1].set_title("Probe accuracy")
-    for axis in axes:
-        axis.set_xlabel("future-token offset")
-        axis.grid(alpha=0.25)
-        axis.legend()
-    figure.tight_layout()
-    output = artifacts.plots_dir / "probes.png"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output, dpi=160)
-    plt.close(figure)
-    return output
-
-
 def plot_run(run_dir: str | Path) -> list[Path]:
-    return [
-        path
-        for path in (plot_training(run_dir), plot_probes(run_dir))
-        if path is not None
-    ]
+    path = plot_training(run_dir)
+    return [] if path is None else [path]

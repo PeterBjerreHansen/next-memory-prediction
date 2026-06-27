@@ -1,7 +1,7 @@
 name: reference
 seed: 0
 model:
-  variant: transformer_ntp
+  architecture: transformer
   block_size: 256
   n_layer: 8
   n_head: 8
@@ -9,24 +9,18 @@ model:
   memory:
     n_pass: 4
 data:
-  source: generated
+  train_file: data/countdown/train1_b4_t100_n500000.txt
+  val_file: data/countdown/val1_b4_t100_n500000.txt
+  generalization_file: data/countdown/val_target1_b4_t100_n500000.txt
   countdown_max_intermediate: 10000
-  countdown_min_target: 10
-  countdown_max_target: 100
   countdown_input_numbers: 4
   countdown_num_equations: 3
   num_pause_tokens: 8
-  train_samples: 500000
-  val_samples: 10000
-  generalization_samples: 10000
-  split_seed: 444
 objective:
-  transition:
-    horizon: 1
-    target: null
-    lambda_transition: 1.0
-    lambda_kl: 1.0
-    projection_factor: 1.3
+  transition: none
+  lambda_transition: 1.0
+  lambda_kl: 1.0
+  projection_factor: 1.3
 training:
   train_steps: 100000
   micro_batch_size: 32
@@ -42,7 +36,5 @@ evaluation:
   generation_prompts: 16
   accuracy_batches: null
   diagnostic_batches: 20
-  probe_steps: 20000
-  probe_batch_size: 256
   checkpoint_metric: final_pass_nll
   checkpoint_mode: min

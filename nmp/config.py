@@ -7,18 +7,9 @@ from typing import Any
 
 import yaml
 
-VARIANTS = (
-    "transformer_ntp",
-    "memory_tape_ntp",
-    "memory_tape_nmp",
-    "memory_tape_hidden_transition",
-    "memory_tape_hidden_transition_kl",
-)
-TRANSITION_VARIANTS = (
-    "memory_tape_nmp",
-    "memory_tape_hidden_transition",
-    "memory_tape_hidden_transition_kl",
-)
+ARCHITECTURES = ("transformer", "memory_tape")
+TRANSITIONS = ("none", "memory", "hidden", "hidden_kl")
+TRANSITION_OBJECTIVES = ("memory", "hidden", "hidden_kl")
 PRECISIONS = ("float32", "bfloat16", "float16")
 
 
@@ -33,7 +24,7 @@ class MemoryConfig:
 
 @dataclass(kw_only=True)
 class ModelConfig:
-    variant: str
+    architecture: str
     block_size: int
     n_layer: int
     n_head: int
@@ -43,96 +34,65 @@ class ModelConfig:
     def validate(self) -> None:
         if isinstance(self.memory, dict):
             self.memory = MemoryConfig(**self.memory)
-        if self.variant not in VARIANTS:
-            accepted = ", ".join(VARIANTS)
-            raise ValueError(f"variant must be one of: {accepted}")
+        if self.architecture not in ARCHITECTURES:
+            accepted = ", ".join(ARCHITECTURES)
+            raise ValueError(f"architecture must be one of: {accepted}")
         if self.block_size < 2:
             raise ValueError("block_size must be at least 2")
         if min(self.n_layer, self.n_head, self.n_embd) < 1:
             raise ValueError("n_layer, n_head, and n_embd must be positive")
         if self.n_embd % self.n_head != 0:
             raise ValueError("n_embd must be divisible by n_head")
-        if self.variant != "transformer_ntp":
+        if self.architecture == "memory_tape":
             self.memory.validate()
 
 
 @dataclass(kw_only=True)
 class DataConfig:
-    source: str = "generated"
-    train_file: str | None = None
-    val_file: str | None = None
+    train_file: str
+    val_file: str
     generalization_file: str | None = None
     countdown_max_intermediate: int = 10_000
-    countdown_min_target: int = 10
-    countdown_max_target: int = 100
     countdown_input_numbers: int = 4
     countdown_num_equations: int = 3
     num_pause_tokens: int = 8
-    train_samples: int = 500_000
-    val_samples: int = 10_000
-    generalization_samples: int = 10_000
-    split_seed: int = 444
 
     def validate(self) -> None:
-        if self.source not in {"generated", "local"}:
-            raise ValueError("data.source must be generated or local")
-        if self.source == "local" and (not self.train_file or not self.val_file):
-            raise ValueError("local data requires train_file and val_file")
+        if not self.train_file or not self.val_file:
+            raise ValueError("data.train_file and data.val_file are required")
         positive = {
             "countdown_max_intermediate": self.countdown_max_intermediate,
-            "countdown_min_target": self.countdown_min_target,
-            "countdown_max_target": self.countdown_max_target,
             "countdown_input_numbers": self.countdown_input_numbers,
             "countdown_num_equations": self.countdown_num_equations,
             "num_pause_tokens": self.num_pause_tokens,
-            "train_samples": self.train_samples,
-            "val_samples": self.val_samples,
         }
         for name, value in positive.items():
             if value < 1:
                 raise ValueError(f"{name} must be positive")
-        if self.countdown_min_target >= self.countdown_max_target:
-            raise ValueError("countdown_min_target must be less than countdown_max_target")
         if self.countdown_num_equations != self.countdown_input_numbers - 1:
             raise ValueError(
                 "countdown_num_equations must equal countdown_input_numbers - 1"
             )
-        if self.generalization_samples < 0:
-            raise ValueError("generalization_samples must be non-negative")
-
-
-@dataclass(kw_only=True)
-class TransitionObjectiveConfig:
-    horizon: int = 1
-    lambda_transition: float = 1.0
-    lambda_kl: float = 1.0
-    target: str | None = None
-    projection_factor: float = 1.3
-
-    def validate(self) -> None:
-        if self.horizon != 1:
-            raise ValueError("transition.horizon must be 1 in this implementation")
-        if self.lambda_transition < 0:
-            raise ValueError("lambda_transition must be non-negative")
-        if self.lambda_kl < 0:
-            raise ValueError("transition.lambda_kl must be non-negative")
-        if self.target is not None and self.target not in {"hidden", "memory"}:
-            raise ValueError("transition.target must be hidden, memory, or null")
-        if self.projection_factor <= 0:
-            raise ValueError("transition.projection_factor must be positive")
 
 
 @dataclass(kw_only=True)
 class ObjectiveConfig:
+    transition: str = "none"
     ntp_pass_weights: list[float] | None = None
-    transition: TransitionObjectiveConfig = field(
-        default_factory=TransitionObjectiveConfig
-    )
+    lambda_transition: float = 1.0
+    lambda_kl: float = 1.0
+    projection_factor: float = 1.3
 
     def validate(self) -> None:
-        if isinstance(self.transition, dict):
-            self.transition = TransitionObjectiveConfig(**self.transition)
-        self.transition.validate()
+        if self.transition not in TRANSITIONS:
+            accepted = ", ".join(TRANSITIONS)
+            raise ValueError(f"objective.transition must be one of: {accepted}")
+        if self.lambda_transition < 0:
+            raise ValueError("lambda_transition must be non-negative")
+        if self.lambda_kl < 0:
+            raise ValueError("lambda_kl must be non-negative")
+        if self.projection_factor <= 0:
+            raise ValueError("projection_factor must be positive")
         if self.ntp_pass_weights is not None:
             self.ntp_pass_weights = [
                 float(weight) for weight in self.ntp_pass_weights
@@ -194,22 +154,12 @@ class EvaluationConfig:
     accuracy_batches: int | None = None
     training_accuracy_interval: int | None = None
     training_accuracy_batches: int = 4
-    probe_steps: int = 1000
-    probe_batch_size: int = 64
-    probe_offsets: list[int] = field(default_factory=lambda: list(range(1, 21)))
     checkpoint_metric: str = "final_pass_nll"
     checkpoint_mode: str = "min"
 
     def validate(self) -> None:
-        if min(
-            self.generation_prompts,
-            self.diagnostic_batches,
-            self.probe_steps,
-            self.probe_batch_size,
-        ) < 1:
+        if min(self.generation_prompts, self.diagnostic_batches) < 1:
             raise ValueError("evaluation counts must be positive")
-        if not self.probe_offsets or min(self.probe_offsets) < 1:
-            raise ValueError("probe_offsets must contain positive integers")
         if self.accuracy_batches is not None and self.accuracy_batches < 1:
             raise ValueError("accuracy_batches must be positive or null")
         if (
@@ -239,26 +189,26 @@ class ExperimentConfig:
         self.model.validate()
         self.data.validate()
         self.objective.validate()
-        default_target = default_transition_target_for_variant(self.model.variant)
-        configured_target = self.objective.transition.target
-        if configured_target is None:
-            self.objective.transition.target = default_target
-        elif default_target is None:
-            raise ValueError("transition.target is only valid for transition variants")
-        elif configured_target != default_target:
+        if self.model.architecture == "transformer":
+            if self.objective.transition != "none":
+                raise ValueError("transformer architecture only supports transition=none")
+            if self.objective.ntp_pass_weights is not None:
+                raise ValueError(
+                    "ntp_pass_weights are only valid for memory_tape architecture"
+                )
+        if (
+            self.model.architecture == "memory_tape"
+            and self.objective.ntp_pass_weights is not None
+            and len(self.objective.ntp_pass_weights) != self.model.memory.n_pass
+        ):
             raise ValueError(
-                f"transition.target must be {default_target!r} for "
-                f"{self.model.variant}"
+                "ntp_pass_weights must have one entry per MemoryTape pass"
             )
-        if self.objective.ntp_pass_weights is not None:
-            if self.model.variant == "transformer_ntp":
-                raise ValueError(
-                    "ntp_pass_weights are only valid for memory-tape variants"
-                )
-            if len(self.objective.ntp_pass_weights) != self.model.memory.n_pass:
-                raise ValueError(
-                    "ntp_pass_weights must have one entry per MemoryTape pass"
-                )
+        if (
+            self.model.architecture != "memory_tape"
+            and self.objective.transition in TRANSITION_OBJECTIVES
+        ):
+            raise ValueError("transition objectives require memory_tape architecture")
         self.training.validate()
         self.evaluation.validate()
 
@@ -271,7 +221,7 @@ class ExperimentConfig:
             name=str(payload["name"]),
             seed=int(payload.get("seed", 0)),
             model=ModelConfig(**payload["model"]),
-            data=DataConfig(**payload.get("data", {})),
+            data=DataConfig(**payload["data"]),
             objective=ObjectiveConfig(**payload.get("objective", {})),
             training=TrainingConfig(**payload["training"]),
             evaluation=EvaluationConfig(**payload.get("evaluation", {})),
@@ -280,47 +230,45 @@ class ExperimentConfig:
         return config
 
 
-def default_transition_target_for_variant(variant: str) -> str | None:
-    if variant == "memory_tape_nmp":
+def transition_target(transition: str) -> str | None:
+    if transition == "memory":
         return "memory"
-    if variant in {
-        "memory_tape_hidden_transition",
-        "memory_tape_hidden_transition_kl",
-    }:
+    if transition in {"hidden", "hidden_kl"}:
         return "hidden"
     return None
 
 
-def transition_target_for_variant(
-    variant: str,
-    transition: TransitionObjectiveConfig | None = None,
-) -> str | None:
-    configured_target = getattr(transition, "target", None)
-    if configured_target is not None:
-        return configured_target
-    return default_transition_target_for_variant(variant)
+def condition_label(config: ExperimentConfig) -> str:
+    if config.model.architecture == "transformer":
+        return "transformer_ntp"
+    transition = config.objective.transition
+    if transition == "none":
+        return "memory_tape_ntp"
+    if transition == "memory":
+        return "memory_tape_nmp"
+    if transition == "hidden":
+        return "memory_tape_hidden_transition"
+    if transition == "hidden_kl":
+        return "memory_tape_hidden_transition_kl"
+    raise ValueError(f"unknown transition: {transition}")
 
 
 def active_objective_metadata(
-    variant: str,
-    transition: TransitionObjectiveConfig,
-) -> dict[str, float | int | str | None]:
-    if variant not in TRANSITION_VARIANTS:
+    objective: ObjectiveConfig,
+) -> dict[str, float | str | None]:
+    if objective.transition not in TRANSITION_OBJECTIVES:
         return {
             "transition_target": None,
-            "transition_horizon": None,
             "lambda_transition": None,
             "lambda_kl": None,
         }
-    metadata: dict[str, float | int | str | None] = {
-        "transition_target": transition_target_for_variant(variant, transition),
-        "transition_horizon": getattr(transition, "horizon", 1),
-        "lambda_transition": getattr(transition, "lambda_transition", 1.0),
-        "lambda_kl": None,
+    return {
+        "transition_target": transition_target(objective.transition),
+        "lambda_transition": objective.lambda_transition,
+        "lambda_kl": objective.lambda_kl
+        if objective.transition == "hidden_kl"
+        else None,
     }
-    if variant == "memory_tape_hidden_transition_kl":
-        metadata["lambda_kl"] = getattr(transition, "lambda_kl", 1.0)
-    return metadata
 
 
 def load_config(path: str | Path) -> ExperimentConfig:

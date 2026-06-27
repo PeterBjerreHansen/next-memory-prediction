@@ -9,11 +9,7 @@ from typing import Any, Sequence
 import torch
 
 from .config import DataConfig
-from .countdown import (
-    CountdownTokenizer,
-    generate_countdown_example,
-    target_splits,
-)
+from .countdown import CountdownTokenizer
 
 
 @dataclass(frozen=True)
@@ -61,81 +57,17 @@ def _load_local_rows(path: str | Path) -> list[str]:
     return rows
 
 
-def _generated_rows(
-    *,
-    config: DataConfig,
-    split: str,
-    sample_count: int,
-    target_pool: Sequence[int],
-) -> list[str]:
-    split_offsets = {"train": 0, "val": 1_000_000, "generalization": 2_000_000}
-    rng = random.Random(config.split_seed + split_offsets[split])
-    return [
-        generate_countdown_example(
-            rng,
-            target_pool=target_pool,
-            input_numbers=config.countdown_input_numbers,
-            max_target=config.countdown_max_target,
-            max_intermediate=config.countdown_max_intermediate,
-        )
-        for _ in range(sample_count)
-    ]
-
-
 def load_corpora(config: DataConfig) -> tuple[CountdownCorpus, CountdownCorpus]:
-    if config.source == "local":
-        return (
-            CountdownCorpus(_load_local_rows(config.train_file)),
-            CountdownCorpus(_load_local_rows(config.val_file)),
-        )
-
-    train_targets, heldout_targets = target_splits(
-        min_target=config.countdown_min_target,
-        max_target=config.countdown_max_target,
-        seed=config.split_seed,
-    )
-    del heldout_targets
     return (
-        CountdownCorpus(
-            _generated_rows(
-                config=config,
-                split="train",
-                sample_count=config.train_samples,
-                target_pool=train_targets,
-            )
-        ),
-        CountdownCorpus(
-            _generated_rows(
-                config=config,
-                split="val",
-                sample_count=config.val_samples,
-                target_pool=train_targets,
-            )
-        ),
+        CountdownCorpus(_load_local_rows(config.train_file)),
+        CountdownCorpus(_load_local_rows(config.val_file)),
     )
 
 
 def load_generalization_corpus(config: DataConfig) -> CountdownCorpus | None:
-    if config.source == "local":
-        if config.generalization_file is None:
-            return None
-        return CountdownCorpus(_load_local_rows(config.generalization_file))
-
-    if config.generalization_samples < 1:
+    if config.generalization_file is None:
         return None
-    _, heldout_targets = target_splits(
-        min_target=config.countdown_min_target,
-        max_target=config.countdown_max_target,
-        seed=config.split_seed,
-    )
-    return CountdownCorpus(
-        _generated_rows(
-            config=config,
-            split="generalization",
-            sample_count=config.generalization_samples,
-            target_pool=heldout_targets,
-        )
-    )
+    return CountdownCorpus(_load_local_rows(config.generalization_file))
 
 
 def make_tokenizer(config: DataConfig) -> CountdownTokenizer:

@@ -85,7 +85,8 @@ def test_nmp_backward_reaches_model_memory_and_embedding_parameters():
     tokens = torch.tensor([[2, 3, 4, 1, 0], [5, 6, 7, 1, 0]])
     output = model(tokens)
     losses = compute_loss(
-        variant="memory_tape_nmp",
+        architecture="memory_tape",
+        transition="memory",
         model=model,
         output=output,
         tokens=tokens,
@@ -116,7 +117,8 @@ def test_hidden_transition_uses_final_pass_hidden_states():
 
     predictor = RecordingPredictor()
     losses = compute_loss(
-        variant="memory_tape_hidden_transition",
+        architecture="memory_tape",
+        transition="hidden",
         model=model,
         output=output,
         tokens=tokens,
@@ -145,7 +147,8 @@ def test_hidden_transition_kl_uses_final_pass_hidden_states():
     predictor = RecordingPredictor()
     target_mask = torch.tensor([[True, True, True, False]])
     losses = compute_loss(
-        variant="memory_tape_hidden_transition_kl",
+        architecture="memory_tape",
+        transition="hidden_kl",
         model=model,
         output=output,
         tokens=tokens,
@@ -197,7 +200,8 @@ def test_memory_transition_uses_final_pass_memory_states():
 
     predictor = RecordingPredictor()
     losses = compute_loss(
-        variant="memory_tape_nmp",
+        architecture="memory_tape",
+        transition="memory",
         model=model,
         output=output,
         tokens=tokens,
@@ -215,7 +219,8 @@ def test_memory_tape_ntp_pass_weights_are_normalized_and_applied():
     tokens = torch.tensor([[2, 3, 4, 1, 0]])
     output = model(tokens)
     losses = compute_loss(
-        variant="memory_tape_ntp",
+        architecture="memory_tape",
+        transition="none",
         model=model,
         output=output,
         tokens=tokens,
@@ -302,16 +307,18 @@ def test_lambda_zero_reproduces_memory_tape_ntp_total():
     tokens = torch.tensor([[2, 3, 4, 1, 0]])
     output = model(tokens)
     ntp = compute_loss(
-        variant="memory_tape_ntp",
+        architecture="memory_tape",
+        transition="none",
         model=model,
         output=output,
         tokens=tokens,
         pad_token_id=0,
         eos_token_id=1,
     )
-    for variant in ("memory_tape_nmp", "memory_tape_hidden_transition"):
+    for transition in ("memory", "hidden"):
         transition_zero = compute_loss(
-            variant=variant,
+            architecture="memory_tape",
+            transition=transition,
             model=model,
             output=output,
             tokens=tokens,
@@ -332,7 +339,8 @@ def test_kl_variant_lambda_zeroes_reproduce_hidden_transition_total():
     target_mask = torch.tensor([[True, True, True, False]])
     output = model(tokens)
     hidden = compute_loss(
-        variant="memory_tape_hidden_transition",
+        architecture="memory_tape",
+        transition="hidden",
         model=model,
         output=output,
         tokens=tokens,
@@ -343,7 +351,8 @@ def test_kl_variant_lambda_zeroes_reproduce_hidden_transition_total():
         lambda_transition=1.0,
     )
     hidden_kl = compute_loss(
-        variant="memory_tape_hidden_transition_kl",
+        architecture="memory_tape",
+        transition="hidden_kl",
         model=model,
         output=output,
         tokens=tokens,

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from conftest import condition_parts
 from nmp.artifacts import artifacts_for, read_jsonl
 from nmp.checkpoint import load_checkpoint
-from nmp.cli.probe import main as probe_main
 from nmp.cli.train import main as train_main
 
 
@@ -24,13 +24,16 @@ from nmp.cli.train import main as train_main
 )
 def test_offline_smoke_workflow(variant, local_countdown_files, tmp_path: Path):
     train_file, val_file = local_countdown_files
+    architecture, transition = condition_parts(variant)
     run_dir = tmp_path / variant
     train_main(
         [
             "--config",
             "configs/scales/smoke.yaml",
-            "--variant",
-            variant,
+            "--architecture",
+            architecture,
+            "--transition",
+            transition,
             "--run-dir",
             str(run_dir),
             "--train-file",
@@ -53,16 +56,6 @@ def test_offline_smoke_workflow(variant, local_countdown_files, tmp_path: Path):
             "2",
         ]
     )
-    probe_main(
-        [
-            "--run-dir",
-            str(run_dir),
-            "--device",
-            "cpu",
-            "--steps",
-            "1",
-        ]
-    )
     artifacts = artifacts_for(run_dir)
     for path in (
         artifacts.config_path,
@@ -72,10 +65,7 @@ def test_offline_smoke_workflow(variant, local_countdown_files, tmp_path: Path):
         artifacts.best_checkpoint,
         artifacts.samples_path,
         artifacts.evaluation_path,
-        artifacts.probe_metrics_path,
-        artifacts.probe_checkpoint_path,
         artifacts.plots_dir / "training.png",
-        artifacts.plots_dir / "probes.png",
     ):
         assert path.exists(), path
     assert load_checkpoint(artifacts.latest_checkpoint)["step"] == 2

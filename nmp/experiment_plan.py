@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from .config import ExperimentConfig
+from .config import ExperimentConfig, condition_label
 
 
 FROM_SELECTION = "from_selection"
@@ -38,7 +38,6 @@ class SelectionConfig:
 @dataclass(frozen=True)
 class PostRunConfig:
     evaluate: bool = True
-    probe: bool = True
     plot: bool = True
     summarize: bool = True
 
@@ -50,15 +49,17 @@ class PostRunConfig:
 @dataclass(frozen=True)
 class ConditionSpec:
     name: str
-    variant: str
+    architecture: str
+    transition: str = "none"
     lambda_transition: float | list[float] | str | None = None
     overrides: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ConditionSpec":
         condition = cls(
-            name=str(payload.get("name", payload["variant"])),
-            variant=str(payload["variant"]),
+            name=str(payload["name"]),
+            architecture=str(payload["architecture"]),
+            transition=str(payload.get("transition", "none")),
             lambda_transition=payload.get("lambda_transition"),
             overrides=dict(payload.get("overrides", {})),
         )
@@ -139,6 +140,8 @@ class ExpandedRunSpec:
     condition: str
     run_id: str
     variant: str
+    architecture: str
+    transition: str
     seed: int
     lambda_transition: float | None
     ntp_pass_weights: list[float] | None
@@ -151,6 +154,8 @@ class ExpandedRunSpec:
             "condition": self.condition,
             "run_id": self.run_id,
             "variant": self.variant,
+            "architecture": self.architecture,
+            "transition": self.transition,
             "seed": self.seed,
             "lambda_transition": self.lambda_transition,
             "ntp_pass_weights": self.ntp_pass_weights,
@@ -165,6 +170,8 @@ class ExpandedRunSpec:
             condition=str(payload["condition"]),
             run_id=str(payload["run_id"]),
             variant=str(payload["variant"]),
+            architecture=str(payload["architecture"]),
+            transition=str(payload["transition"]),
             seed=int(payload["seed"]),
             lambda_transition=(
                 None
@@ -258,11 +265,11 @@ def _lambda_values(
             raise ValueError(
                 f"{condition.name} requires selected transition weights"
             )
-        if condition.variant not in selected_lambdas:
+        if condition.name not in selected_lambdas:
             raise ValueError(
-                f"selection file is missing variant {condition.variant}"
+                f"selection file is missing condition {condition.name}"
             )
-        return [float(selected_lambdas[condition.variant])]
+        return [float(selected_lambdas[condition.name])]
     if isinstance(raw, list):
         return [float(value) for value in raw]
     if raw is None:
@@ -272,11 +279,11 @@ def _lambda_values(
 
 def _run_id(
     *,
-    variant: str,
+    condition: str,
     seed: int,
     lambda_transition: float | None,
 ) -> str:
-    parts = [variant]
+    parts = [condition]
     if lambda_transition is not None:
         parts.append(f"lambda_{format_lambda(lambda_transition)}")
     parts.append(f"seed_{seed}")
@@ -286,18 +293,20 @@ def _run_id(
 def _apply_run_identity(
     payload: dict[str, Any],
     *,
-    variant: str,
+    architecture: str,
+    transition: str,
     seed: int,
     lambda_transition: float | None,
 ) -> dict[str, Any]:
     payload = copy.deepcopy(payload)
     payload["seed"] = int(seed)
-    payload.setdefault("model", {})["variant"] = variant
+    payload.setdefault("model", {})["architecture"] = architecture
+    payload.setdefault("objective", {})["transition"] = transition
     if lambda_transition is not None:
-        payload.setdefault("objective", {}).setdefault("transition", {})[
-            "lambda_transition"
-        ] = float(lambda_transition)
-    if variant == "transformer_ntp":
+        payload.setdefault("objective", {})["lambda_transition"] = float(
+            lambda_transition
+        )
+    if architecture == "transformer":
         payload.setdefault("objective", {}).pop("ntp_pass_weights", None)
     return payload
 
@@ -330,13 +339,14 @@ def expand_plan(
                 if seeds is not None and seed not in seeds:
                     continue
                 run_id = _run_id(
-                    variant=condition.variant,
+                    condition=condition.name,
                     seed=seed,
                     lambda_transition=lambda_transition,
                 )
                 payload = _apply_run_identity(
                     condition_payload,
-                    variant=condition.variant,
+                    architecture=condition.architecture,
+                    transition=condition.transition,
                     seed=seed,
                     lambda_transition=lambda_transition,
                 )
@@ -354,7 +364,9 @@ def expand_plan(
                             experiment=plan.name,
                             condition=condition.name,
                             run_id=run_id,
-                            variant=condition.variant,
+                            variant=condition_label(config),
+                            architecture=condition.architecture,
+                            transition=condition.transition,
                             seed=seed,
                             lambda_transition=lambda_transition,
                             ntp_pass_weights=_ntp_pass_weights(config),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from conftest import condition_parts
 from nmp.artifacts import append_jsonl, artifacts_for, write_json
 from nmp.config import ExperimentConfig, save_config
 from nmp.experiment_plan import (
@@ -67,26 +68,25 @@ def _write_synthetic_run(
     best_score: float,
     best_nll: float,
 ) -> None:
+    architecture, transition = condition_parts(variant)
     config = ExperimentConfig.from_dict(
         {
             "name": "synthetic",
             "seed": seed,
             "model": {
-                "variant": variant,
+                "architecture": architecture,
                 "block_size": 8,
                 "n_layer": 1,
                 "n_head": 1,
                 "n_embd": 8,
                 "memory": {"n_pass": 2},
             },
+            "data": {"train_file": "train.txt", "val_file": "val.txt"},
             "objective": {
-                "transition": {
-                    "lambda_transition": (
-                        1.0
-                        if lambda_transition is None
-                        else lambda_transition
-                    ),
-                }
+                "transition": transition,
+                "lambda_transition": (
+                    1.0 if lambda_transition is None else lambda_transition
+                ),
             },
             "training": {"train_steps": 1, "micro_batch_size": 1},
         }
@@ -96,7 +96,6 @@ def _write_synthetic_run(
     save_config(artifacts.config_path, config)
     artifacts.best_checkpoint.write_bytes(b"synthetic")
     (artifacts.plots_dir / "training.png").write_bytes(b"png")
-    (artifacts.plots_dir / "probes.png").write_bytes(b"png")
     append_jsonl(
         artifacts.metrics_path,
         {
@@ -126,7 +125,7 @@ def _write_synthetic_run(
         artifacts.metrics_path,
         {"event": "run_end", "step": 1, "wall_time_seconds": 10.0 + seed},
     )
-    transition = variant in {
+    has_transition = variant in {
         "memory_tape_nmp",
         "memory_tape_hidden_transition",
         "memory_tape_hidden_transition_kl",
@@ -159,7 +158,7 @@ def _write_synthetic_run(
                 "val_valid_equation_3": best_score,
                 "perplexity": 20.0 + best_nll,
                 "pass_nlls": pass_nlls,
-                "transition_prediction_loss": 0.2 if transition else None,
+                "transition_prediction_loss": 0.2 if has_transition else None,
                 "transition_kl_loss": (
                     0.05 if variant == "memory_tape_hidden_transition_kl" else None
                 ),
@@ -168,15 +167,15 @@ def _write_synthetic_run(
                 "final_pass_nll": best_nll + 9.0,
                 "perplexity": 200.0 + best_nll,
                 "pass_nlls": [value + 9.0 for value in pass_nlls],
-                "transition_prediction_loss": 9.0 if transition else None,
+                "transition_prediction_loss": 9.0 if has_transition else None,
                 "transition_kl_loss": (
                     0.5 if variant == "memory_tape_hidden_transition_kl" else None
                 ),
             },
             "parameters": {
                 "model": 100,
-                "training_only": 10 if transition else 0,
-                "total_training": 110 if transition else 100,
+                "training_only": 10 if has_transition else 0,
+                "total_training": 110 if has_transition else 100,
             },
             "generalization": {
                 "generalization_accuracy": best_score / 2,
@@ -190,29 +189,6 @@ def _write_synthetic_run(
             "representations": {"hidden_mean_norm": 1.0},
         },
     )
-    append_jsonl(
-        artifacts.probe_metrics_path,
-        {
-            "event": "probe_validation",
-            "source": "hidden",
-            "offset": 1,
-            "cross_entropy": best_nll,
-            "accuracy": 0.1,
-            "tokens": 20,
-        },
-    )
-    if variant != "transformer_ntp":
-        append_jsonl(
-            artifacts.probe_metrics_path,
-            {
-                "event": "probe_validation",
-                "source": "memory",
-                "offset": 1,
-                "cross_entropy": best_nll + 0.1,
-                "accuracy": 0.09,
-                "tokens": 20,
-            },
-        )
 
 
 def test_development_summary_selects_mean_best_checkpoint_nll(tmp_path: Path):

@@ -133,10 +133,12 @@ def test_validation_nll_is_weighted_by_valid_target_tokens():
         ),
     ]
     config = SimpleNamespace(
-        model=SimpleNamespace(variant="transformer_ntp"),
+        model=SimpleNamespace(architecture="transformer"),
         training=SimpleNamespace(precision="float32"),
         objective=SimpleNamespace(
-            transition=SimpleNamespace(lambda_transition=1.0),
+            transition="none",
+            lambda_transition=1.0,
+            lambda_kl=1.0,
             ntp_pass_weights=None,
         ),
     )
@@ -199,10 +201,12 @@ def test_validation_transition_loss_is_weighted_by_valid_transitions():
         ),
     ]
     config = SimpleNamespace(
-        model=SimpleNamespace(variant="memory_tape_nmp"),
+        model=SimpleNamespace(architecture="memory_tape"),
         training=SimpleNamespace(precision="float32"),
         objective=SimpleNamespace(
-            transition=SimpleNamespace(lambda_transition=1.0),
+            transition="memory",
+            lambda_transition=1.0,
+            lambda_kl=1.0,
             ntp_pass_weights=None,
         ),
     )
@@ -211,7 +215,8 @@ def test_validation_transition_loss_is_weighted_by_valid_transitions():
     for batch in batches:
         output = model(batch.tokens)
         losses = compute_loss(
-            variant="memory_tape_nmp",
+            architecture="memory_tape",
+            transition="memory",
             model=model,
             output=output,
             tokens=batch.tokens,

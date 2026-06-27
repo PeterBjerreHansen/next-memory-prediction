@@ -6,8 +6,9 @@ from pathlib import Path
 
 from nmp.checkpoint import config_from_checkpoint, load_checkpoint
 from nmp.config import (
+    ARCHITECTURES,
     ExperimentConfig,
-    VARIANTS,
+    TRANSITIONS,
     load_config,
 )
 from nmp.evaluation import evaluate_run
@@ -35,14 +36,10 @@ def parse_args(argv=None):
     parser.add_argument("--steps", type=int)
     parser.add_argument("--device")
     parser.add_argument("--seed", type=int)
-    parser.add_argument(
-        "--variant",
-        choices=VARIANTS,
-    )
+    parser.add_argument("--architecture", choices=ARCHITECTURES)
+    parser.add_argument("--transition", choices=TRANSITIONS)
     parser.add_argument("--lambda-transition", type=float)
     parser.add_argument("--lambda-kl", type=float)
-    parser.add_argument("--transition-horizon", type=int)
-    parser.add_argument("--transition-target", choices=("hidden", "memory"))
     parser.add_argument(
         "--ntp-pass-weights",
         type=parse_ntp_pass_weights,
@@ -64,11 +61,10 @@ def validate_resume_args(args) -> None:
         "--config": args.config,
         "--run-dir": args.run_dir,
         "--seed": args.seed,
-        "--variant": args.variant,
+        "--architecture": args.architecture,
+        "--transition": args.transition,
         "--lambda-transition": args.lambda_transition,
         "--lambda-kl": args.lambda_kl,
-        "--transition-horizon": args.transition_horizon,
-        "--transition-target": args.transition_target,
         "--ntp-pass-weights": args.ntp_pass_weights,
         "--train-file": args.train_file,
         "--val-file": args.val_file,
@@ -101,24 +97,21 @@ def resolve_config(args) -> tuple[ExperimentConfig, Path]:
         config.training.device = args.device
     if args.seed is not None:
         config.seed = args.seed
-    if args.variant is not None:
-        config.model.variant = args.variant
-        config.objective.transition.target = None
-        config.name = f"{config.name}-{config.model.variant}"
+    if args.architecture is not None:
+        config.model.architecture = args.architecture
+        config.name = f"{config.name}-{config.model.architecture}"
+    if args.transition is not None:
+        config.objective.transition = args.transition
+        config.name = f"{config.name}-{config.objective.transition}"
     if args.lambda_transition is not None:
-        config.objective.transition.lambda_transition = args.lambda_transition
+        config.objective.lambda_transition = args.lambda_transition
     if args.lambda_kl is not None:
-        config.objective.transition.lambda_kl = args.lambda_kl
-    if args.transition_horizon is not None:
-        config.objective.transition.horizon = args.transition_horizon
-    if args.transition_target is not None:
-        config.objective.transition.target = args.transition_target
+        config.objective.lambda_kl = args.lambda_kl
     if args.ntp_pass_weights is not None:
         config.objective.ntp_pass_weights = args.ntp_pass_weights
     if args.train_file is not None or args.val_file is not None:
         if args.train_file is None or args.val_file is None:
             raise ValueError("--train-file and --val-file must be provided together")
-        config.data.source = "local"
         config.data.train_file = args.train_file
         config.data.val_file = args.val_file
     if args.generalization_file is not None:

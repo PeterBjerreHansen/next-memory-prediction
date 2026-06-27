@@ -10,7 +10,7 @@ from .checkpoint import load_checkpoint, restore_checkpoint, save_checkpoint
 from .config import (
     ExperimentConfig,
     active_objective_metadata,
-    transition_target_for_variant,
+    condition_label,
 )
 from .data import (
     StatefulBatchStream,
@@ -109,11 +109,10 @@ def train_experiment(
         {
             "event": "run_start" if step == 0 else "run_resume",
             "step": step,
-            "variant": config.model.variant,
-            **active_objective_metadata(
-                config.model.variant,
-                config.objective.transition,
-            ),
+            "condition": condition_label(config),
+            "architecture": config.model.architecture,
+            "transition": config.objective.transition,
+            **active_objective_metadata(config.objective),
             "ntp_pass_weights": config.objective.ntp_pass_weights,
             "device": str(device),
             "effective_batch_size": config.training.effective_batch_size,
@@ -164,7 +163,8 @@ def train_experiment(
             with autocast_context(device, config.training.precision):
                 output = runtime_model(batch.tokens)
                 losses = compute_loss(
-                    variant=config.model.variant,
+                    architecture=config.model.architecture,
+                    transition=config.objective.transition,
                     model=model,
                     output=output,
                     tokens=batch.tokens,
@@ -172,13 +172,8 @@ def train_experiment(
                     pad_token_id=tokenizer.pad_id,
                     eos_token_id=tokenizer.eos_id,
                     predictor=runtime_predictor,
-                    lambda_transition=config.objective.transition.lambda_transition,
-                    lambda_kl=config.objective.transition.lambda_kl,
-                    transition_horizon=config.objective.transition.horizon,
-                    transition_target=transition_target_for_variant(
-                        config.model.variant,
-                        config.objective.transition,
-                    ),
+                    lambda_transition=config.objective.lambda_transition,
+                    lambda_kl=config.objective.lambda_kl,
                     ntp_pass_weights=config.objective.ntp_pass_weights,
                 )
                 scaled_loss = (

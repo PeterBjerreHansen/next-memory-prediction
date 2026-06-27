@@ -6,8 +6,8 @@ import torch
 from torch.nn import functional as F
 
 from .config import (
-    TRANSITION_VARIANTS,
-    transition_target_for_variant,
+    TRANSITION_OBJECTIVES,
+    transition_target as transition_target_for_objective,
 )
 from .models import (
     CausalTransformer,
@@ -220,7 +220,8 @@ def temporal_transition_self_distillation_kl_loss(
 
 def compute_loss(
     *,
-    variant: str,
+    architecture: str,
+    transition: str,
     model: CausalTransformer | MemoryTapeTransformer,
     output: TransformerOutput | MemoryTapeOutput,
     tokens: torch.Tensor,
@@ -230,17 +231,15 @@ def compute_loss(
     predictor: LatentTransitionPredictor | None = None,
     lambda_transition: float = 1.0,
     lambda_kl: float = 1.0,
-    transition_horizon: int = 1,
-    transition_target: str | None = None,
     ntp_pass_weights: list[float] | tuple[float, ...] | None = None,
 ) -> LossBreakdown:
-    if transition_horizon != 1:
-        raise ValueError("transition_horizon must be 1 in this implementation")
-    if variant == "transformer_ntp":
+    if architecture == "transformer":
+        if transition != "none":
+            raise ValueError("transformer architecture only supports transition=none")
         if ntp_pass_weights is not None:
-            raise ValueError("transformer_ntp does not use ntp_pass_weights")
+            raise ValueError("transformer architecture does not use ntp_pass_weights")
         if not isinstance(output, TransformerOutput):
-            raise TypeError("transformer_ntp requires TransformerOutput")
+            raise TypeError("transformer architecture requires TransformerOutput")
         nll = next_token_loss(
             output.logits,
             tokens,
@@ -258,10 +257,12 @@ def compute_loss(
             transition_target=None,
         )
 
+    if architecture != "memory_tape":
+        raise ValueError(f"unknown architecture: {architecture}")
     if not isinstance(model, MemoryTapeTransformer) or not isinstance(
         output, MemoryTapeOutput
     ):
-        raise TypeError("memory-tape variants require MemoryTapeTransformer output")
+        raise TypeError("memory_tape architecture requires MemoryTapeTransformer output")
     pass_nlls = tuple(
         next_token_loss(logits, tokens, pad_token_id=pad_token_id)
         if target_mask is None
@@ -283,13 +284,13 @@ def compute_loss(
     ).sum()
     transition_loss = None
     transition_kl_loss = None
-    transition_target = transition_target or transition_target_for_variant(variant)
+    transition_target = transition_target_for_objective(transition)
     total = ntp_loss
-    if variant in TRANSITION_VARIANTS:
+    if transition in TRANSITION_OBJECTIVES:
         if predictor is None:
-            raise ValueError(f"{variant} requires a transition predictor")
+            raise ValueError(f"transition={transition} requires a transition predictor")
         if transition_target not in {"memory", "hidden"}:
-            raise ValueError(f"{variant} requires memory or hidden transition target")
+            raise ValueError(f"transition={transition} requires a latent target")
         latent_states = (
             output.memory_states
             if transition_target == "memory"
@@ -309,7 +310,7 @@ def compute_loss(
             pad_token_id=pad_token_id,
         )
         total = total + lambda_transition * transition_loss
-        if variant == "memory_tape_hidden_transition_kl":
+        if transition == "hidden_kl":
             transition_kl_loss = temporal_transition_self_distillation_kl_loss(
                 model,
                 predicted_latent,
@@ -320,8 +321,8 @@ def compute_loss(
                 pad_token_id=pad_token_id,
             )
             total = total + lambda_kl * transition_kl_loss
-    elif variant != "memory_tape_ntp":
-        raise ValueError(f"unknown variant: {variant}")
+    elif transition != "none":
+        raise ValueError(f"unknown transition: {transition}")
 
     return LossBreakdown(
         total=total,

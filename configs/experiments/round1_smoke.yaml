@@ -15,27 +15,31 @@ seeds: [0]
 
 conditions:
   - name: transformer_ntp
-    variant: transformer_ntp
+    architecture: transformer
+    transition: none
     lambda_transition: null
 
   - name: memory_tape_ntp
-    variant: memory_tape_ntp
+    architecture: memory_tape
+    transition: none
     lambda_transition: null
 
   - name: memory_tape_nmp
-    variant: memory_tape_nmp
+    architecture: memory_tape
+    transition: memory
     lambda_transition: [1.0]
 
   - name: memory_tape_hidden_transition
-    variant: memory_tape_hidden_transition
+    architecture: memory_tape
+    transition: hidden
     lambda_transition: [1.0]
 
   - name: memory_tape_hidden_transition_kl
-    variant: memory_tape_hidden_transition_kl
+    architecture: memory_tape
+    transition: hidden_kl
     lambda_transition: [1.0]
 
 post_run:
   evaluate: true
-  probe: true
   plot: true
   summarize: true

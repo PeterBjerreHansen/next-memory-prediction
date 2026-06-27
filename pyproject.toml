@@ -16,7 +16,6 @@ dev = ["pytest>=7"]
 [project.scripts]
 nmp-train = "nmp.cli.train:main"
 nmp-evaluate = "nmp.cli.evaluate:main"
-nmp-probe = "nmp.cli.probe:main"
 nmp-plot = "nmp.cli.plot:main"
 nmp-run-experiment = "nmp.cli.run_experiment:main"
 nmp-summarize = "nmp.cli.summarize:main"

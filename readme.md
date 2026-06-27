@@ -36,8 +36,8 @@ predictor:
 
 NTP is masked on Countdown prompt and pause tokens. Solution tokens and EOS are
 supervised. Transition loss is masked only for transitions into EOS or padding.
-For the KL variant, the LM head is detached for the student logits, teacher
-logits are stop-gradient, and `objective.transition.lambda_kl` weights the
+For the KL condition, the LM head is detached for the student logits, teacher
+logits are stop-gradient, and `objective.lambda_kl` weights the
 self-distillation term.
 
 ## Data
@@ -46,7 +46,8 @@ The custom Countdown tokenizer assigns one atomic token to every integer from
 `0` through `data.countdown_max_intermediate`, plus tokens for `|`, `*`, `/`,
 `+`, `-`, `=`, `,`, EOS, and PAD.
 
-Smoke configs use deterministic generated data. For paper-scale files:
+Training reads explicit Countdown files. Use the generator CLI to create
+paper-scale files:
 
 ```bash
 python -m nmp.cli.generate_countdown \
@@ -63,7 +64,8 @@ Then run with local files:
 ```bash
 python -m nmp.cli.train \
   --config configs/scales/smoke.yaml \
-  --variant memory_tape_nmp \
+  --architecture memory_tape \
+  --transition memory \
   --train-file data/countdown/train1_b4_t100_n500000.txt \
   --val-file data/countdown/val1_b4_t100_n500000.txt \
   --generalization-file data/countdown/val_target1_b4_t100_n500000.txt \
@@ -93,7 +95,7 @@ The manifests select checkpoints and transition weights by `final_pass_nll` with
 solution accuracy is sparse early in training.
 Reports still include final-pass NLL, perplexity, transition loss, KL
 auxiliary loss diagnostics, throughput, representation diagnostics, generated
-samples, and linear probes.
+samples, and per-equation validity metrics.
 
 The development scale uses 100k generated training examples. During training,
 NLL validation/checkpointing is intentionally less frequent than the original
@@ -103,10 +105,11 @@ validation slice.
 
 ## Evaluation
 
-Countdown accuracy is measured by greedy-generating the fixed three-equation
-solution from the prompt, parsing equations, checking integer arithmetic,
-tracking available operands as a multiset, and requiring the final equation to
-reach the target. This strict multiset metric is the primary `val_accuracy`.
+Countdown accuracy is measured by greedy-generating the configured number of
+solution equations from the prompt, parsing equations, checking integer
+arithmetic, tracking available operands as a multiset, and requiring the final
+equation to reach the target. This strict multiset metric is the primary
+`val_accuracy`.
 Runs also report `val_nextlat_compat_accuracy`, which reproduces the looser
 upstream evaluator by using set membership and not consuming operands.
 Final evaluation uses `evaluation.accuracy_batches`; the default `null` walks
@@ -117,9 +120,7 @@ Validation metrics include:
 - `val_accuracy`
 - `val_strict_multiset_accuracy`
 - `val_nextlat_compat_accuracy`
-- `val_valid_equation_1`
-- `val_valid_equation_2`
-- `val_valid_equation_3`
+- `val_valid_equation_N` for each configured equation position
 - optional `generalization_accuracy` and
   `generalization_nextlat_compat_accuracy` on held-out target numbers
 

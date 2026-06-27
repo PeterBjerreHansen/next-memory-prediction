@@ -80,14 +80,13 @@ def test_local_corpus_and_stream_state_are_reproducible(local_countdown_files):
             "name": "data",
             "seed": 0,
             "model": {
-                "variant": "transformer_ntp",
+                "architecture": "transformer",
                 "block_size": 40,
                 "n_layer": 1,
                 "n_head": 1,
                 "n_embd": 8,
             },
             "data": {
-                "source": "local",
                 "train_file": str(train),
                 "val_file": str(val),
             },
@@ -147,38 +146,42 @@ def test_hidden_transition_kl_variant_validates():
             "name": "hidden-kl",
             "seed": 0,
             "model": {
-                "variant": "memory_tape_hidden_transition_kl",
+                "architecture": "memory_tape",
                 "block_size": 8,
                 "n_layer": 1,
                 "n_head": 1,
                 "n_embd": 8,
                 "memory": {"n_pass": 2},
             },
-            "objective": {"transition": {"lambda_transition": 0.3, "lambda_kl": 1.0}},
+            "data": {"train_file": "train.txt", "val_file": "val.txt"},
+            "objective": {
+                "transition": "hidden_kl",
+                "lambda_transition": 0.3,
+                "lambda_kl": 1.0,
+            },
             "training": {"train_steps": 1, "micro_batch_size": 1},
         }
     )
-    assert config.model.variant == "memory_tape_hidden_transition_kl"
-    assert config.objective.transition.target == "hidden"
-    assert config.objective.transition.horizon == 1
-    assert config.objective.transition.lambda_kl == 1.0
+    assert config.model.architecture == "memory_tape"
+    assert config.objective.transition == "hidden_kl"
+    assert config.objective.lambda_kl == 1.0
 
 
-def test_transition_target_must_match_variant():
-    with pytest.raises(ValueError, match="transition.target"):
+def test_transformer_rejects_transition_objective():
+    with pytest.raises(ValueError, match="only supports transition=none"):
         ExperimentConfig.from_dict(
             {
-                "name": "bad-target",
+                "name": "bad-transition",
                 "seed": 0,
                 "model": {
-                    "variant": "memory_tape_hidden_transition",
+                    "architecture": "transformer",
                     "block_size": 8,
                     "n_layer": 1,
                     "n_head": 1,
                     "n_embd": 8,
-                    "memory": {"n_pass": 2},
                 },
-                "objective": {"transition": {"target": "memory"}},
+                "data": {"train_file": "train.txt", "val_file": "val.txt"},
+                "objective": {"transition": "memory"},
                 "training": {"train_steps": 1, "micro_batch_size": 1},
             }
         )
@@ -190,13 +193,14 @@ def test_ntp_pass_weights_validate_against_memory_tape_pass_count():
             "name": "weighted",
             "seed": 0,
             "model": {
-                "variant": "memory_tape_ntp",
+                "architecture": "memory_tape",
                 "block_size": 8,
                 "n_layer": 1,
                 "n_head": 1,
                 "n_embd": 8,
                 "memory": {"n_pass": 4},
             },
+            "data": {"train_file": "train.txt", "val_file": "val.txt"},
             "objective": {"ntp_pass_weights": [0, 0, 0.5, 0.5]},
             "training": {"train_steps": 1, "micro_batch_size": 1},
         }
@@ -212,8 +216,8 @@ def test_ntp_pass_weights_cli_parses_json_list(tmp_path):
             "configs/scales/development.yaml",
             "--run-dir",
             str(tmp_path / "run"),
-            "--variant",
-            "memory_tape_ntp",
+            "--architecture",
+            "memory_tape",
             "--ntp-pass-weights",
             "[0.0, 0.0, 0.5, 0.5]",
         ]
@@ -229,24 +233,20 @@ def test_transition_objective_cli_overrides(tmp_path):
             "configs/scales/development.yaml",
             "--run-dir",
             str(tmp_path / "run"),
-            "--variant",
-            "memory_tape_hidden_transition_kl",
+            "--architecture",
+            "memory_tape",
+            "--transition",
+            "hidden_kl",
             "--lambda-transition",
             "0.3",
             "--lambda-kl",
             "0.7",
-            "--transition-horizon",
-            "1",
-            "--transition-target",
-            "hidden",
         ]
     )
     config, _ = resolve_config(args)
-    transition = config.objective.transition
-    assert transition.target == "hidden"
-    assert transition.horizon == 1
-    assert transition.lambda_transition == 0.3
-    assert transition.lambda_kl == 0.7
+    assert config.objective.transition == "hidden_kl"
+    assert config.objective.lambda_transition == 0.3
+    assert config.objective.lambda_kl == 0.7
 
 
 def test_resume_rejects_config_mutating_overrides(tmp_path):
@@ -254,8 +254,8 @@ def test_resume_rejects_config_mutating_overrides(tmp_path):
         [
             "--resume-from",
             str(tmp_path / "latest.pt"),
-            "--variant",
-            "memory_tape_nmp",
+            "--transition",
+            "memory",
         ]
     )
     with pytest.raises(ValueError, match="only accepts --steps and --device"):

@@ -168,12 +168,6 @@ class CausalTransformer(nn.Module):
             if name.endswith("c_proj.weight"):
                 nn.init.normal_(parameter, mean=0.0, std=std)
 
-    def get_num_params(self, *, non_embedding: bool = True) -> int:
-        total = sum(parameter.numel() for parameter in self.parameters())
-        if non_embedding:
-            total -= self.transformer["wpe"].weight.numel()
-        return total
-
     def token_embeddings(self, ids: torch.Tensor) -> torch.Tensor:
         return self.transformer["wte"](ids)
 
@@ -282,11 +276,10 @@ class MemoryBlock(nn.Module):
 
 
 class MemoryTapeTransformer(nn.Module):
-    """Faithful copy of the upstream MemoryTape core with structured outputs."""
+    """MemoryTape core with structured outputs."""
 
     def __init__(self, config: MemoryTapeConfig):
         super().__init__()
-        object.__setattr__(self, "_rng_state_before_construction", torch.get_rng_state())
         self.config = config
         self.transformer = nn.ModuleDict(
             {
@@ -299,8 +292,8 @@ class MemoryTapeTransformer(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.ln_mem = LayerNorm(config.n_embd)
         self.mem_head = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self._finish_initialization()
-        del self._rng_state_before_construction
+        self.apply(self._init_weights)
+        self._init_residual_projections()
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -310,56 +303,17 @@ class MemoryTapeTransformer(nn.Module):
         elif isinstance(module, nn.Embedding):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def _causal_transformer_apply_start_rng_state(self):
-        current_state = torch.get_rng_state()
-        torch.set_rng_state(self._rng_state_before_construction)
-        try:
-            nn.ModuleDict(
-                {
-                    "wte": nn.Embedding(self.config.vocab_size, self.config.n_embd),
-                    "h": nn.ModuleList(
-                        [
-                            TransformerBlock(self.config)
-                            for _ in range(self.config.n_layer)
-                        ]
-                    ),
-                    "wpe": nn.Embedding(self.config.block_size, self.config.n_embd),
-                    "ln_f": LayerNorm(self.config.n_embd),
-                }
-            )
-            nn.Linear(self.config.n_embd, self.config.vocab_size, bias=False)
-            return torch.get_rng_state()
-        finally:
-            torch.set_rng_state(current_state)
-
-    def _finish_initialization(self) -> None:
-        torch.set_rng_state(self._causal_transformer_apply_start_rng_state())
-        self._init_weights(self.transformer["wte"])
-        for block in self.transformer["h"]:
-            block.attn.apply(self._init_weights)
-            block.mlp.apply(self._init_weights)
-        self._init_weights(self.transformer["wpe"])
-        self._init_weights(self.lm_head)
-
+    def _init_residual_projections(self) -> None:
         residual_std = 0.02 / math.sqrt(2 * self.config.n_layer)
         for block in self.transformer["h"]:
             nn.init.normal_(block.attn.c_proj.weight, mean=0.0, std=residual_std)
             nn.init.normal_(block.mlp.c_proj.weight, mean=0.0, std=residual_std)
-        for block in self.transformer["h"]:
-            block.cross_attn.apply(self._init_weights)
-        self._init_weights(self.mem_head)
         for block in self.transformer["h"]:
             nn.init.normal_(
                 block.cross_attn.c_proj.weight,
                 mean=0.0,
                 std=residual_std,
             )
-
-    def get_num_params(self, *, non_embedding: bool = True) -> int:
-        total = sum(parameter.numel() for parameter in self.parameters())
-        if non_embedding:
-            total -= self.transformer["wpe"].weight.numel()
-        return total
 
     def token_embeddings(self, ids: torch.Tensor) -> torch.Tensor:
         return self.transformer["wte"](ids)
@@ -417,23 +371,6 @@ class MemoryTapeTransformer(nn.Module):
 
     def forward(self, ids: torch.Tensor) -> MemoryTapeOutput:
         return self.forward_passes(ids)
-
-    def memory_gate_stats(self) -> dict[str, object] | None:
-        values = []
-        for block in self.transformer["h"]:
-            raw = float(block.memory_gate.detach().cpu())
-            effective = float(
-                torch.as_tensor(block.memory_gate_scale()).detach().cpu()
-            )
-            values.append((raw, effective))
-        effective_values = [item[1] for item in values]
-        return {
-            "mode": "scalar",
-            "raw": [item[0] for item in values],
-            "effective": effective_values,
-            "mean_abs_effective": sum(map(abs, effective_values)) / len(values),
-            "max_abs_effective": max(map(abs, effective_values)),
-        }
 
     @torch.no_grad()
     def generate(
@@ -553,6 +490,3 @@ class LatentTransitionPredictor(nn.Module):
             torch.cat((next_token_embeddings, current_latent), dim=-1)
         )
         return current_latent + self.mlp(inputs)
-
-    def get_num_params(self) -> int:
-        return sum(parameter.numel() for parameter in self.parameters())

@@ -35,7 +35,6 @@ def parse_args(argv=None):
     )
     parser.add_argument("--device")
     parser.add_argument("--steps", type=int)
-    parser.add_argument("--skip-probe", action="store_true")
     parser.add_argument("--skip-summary", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
@@ -91,19 +90,6 @@ def train_command(run, plan, *, device: str | None, steps: int | None) -> list[s
         command.append("--skip-evaluate")
     if not plan.post_run.plot:
         command.append("--skip-plot")
-    return command
-
-
-def probe_command(run, *, device: str | None) -> list[str]:
-    command = [
-        sys.executable,
-        "-m",
-        "nmp.cli.probe",
-        "--run-dir",
-        str(run.spec.run_dir),
-    ]
-    if device is not None:
-        command.extend(["--device", device])
     return command
 
 
@@ -173,11 +159,6 @@ def main(argv=None):
             ),
             dry_run=args.dry_run,
         )
-        if plan.post_run.probe and not args.skip_probe:
-            run(
-                probe_command(run_spec, device=args.device),
-                dry_run=args.dry_run,
-            )
     if (
         plan.post_run.summarize
         and not args.skip_summary

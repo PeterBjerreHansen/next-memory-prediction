@@ -19,8 +19,6 @@ class RunArtifacts:
     best_checkpoint: Path
     samples_path: Path
     evaluation_path: Path
-    probe_metrics_path: Path
-    probe_checkpoint_path: Path
     plots_dir: Path
 
 
@@ -35,8 +33,6 @@ def artifacts_for(run_dir: str | Path) -> RunArtifacts:
         best_checkpoint=root / "best.pt",
         samples_path=root / "samples.jsonl",
         evaluation_path=root / "evaluation.json",
-        probe_metrics_path=root / "probe_metrics.jsonl",
-        probe_checkpoint_path=root / "probes.pt",
         plots_dir=root / "plots",
     )
 
@@ -69,11 +65,9 @@ def prepare_run(
         for path in (
             artifacts.metrics_path,
             artifacts.samples_path,
-            artifacts.probe_metrics_path,
             artifacts.latest_checkpoint,
             artifacts.best_checkpoint,
             artifacts.evaluation_path,
-            artifacts.probe_checkpoint_path,
         ):
             if path.exists():
                 path.unlink()

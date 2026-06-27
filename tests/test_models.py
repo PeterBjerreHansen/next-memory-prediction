@@ -50,30 +50,6 @@ def test_model_output_shapes_and_backward():
     assert memory_model.mem_head.weight.grad is not None
 
 
-def test_first_pass_exactly_matches_trunk_matched_transformer():
-    seed = 31
-    base_config = TransformerConfig(
-        block_size=8,
-        vocab_size=31,
-        n_layer=2,
-        n_head=2,
-        n_embd=16,
-    )
-    memory_config = MemoryTapeConfig(
-        **base_config.to_dict(),
-        n_pass=3,
-    )
-    torch.manual_seed(seed)
-    baseline = CausalTransformer(base_config)
-    torch.manual_seed(seed)
-    memory_model = MemoryTapeTransformer(memory_config)
-    ids = torch.randint(0, 31, (2, 8))
-    assert torch.equal(
-        baseline(ids).logits,
-        memory_model(ids).logits_per_pass[0],
-    )
-
-
 @pytest.mark.parametrize("model_kind", ["transformer", "memory"])
 def test_future_tokens_cannot_change_earlier_outputs(model_kind):
     torch.manual_seed(5)
@@ -140,7 +116,7 @@ def test_shifted_previous_pass_memory_is_used():
     )
 
 
-def test_scalar_gate_starts_at_point_two():
+def test_scalar_gate_parameter_starts_at_point_two():
     model = MemoryTapeTransformer(
         MemoryTapeConfig(
             block_size=4,
@@ -151,8 +127,11 @@ def test_scalar_gate_starts_at_point_two():
             n_pass=2,
         )
     )
-    stats = model.memory_gate_stats()
-    assert stats["effective"] == pytest.approx([0.2, 0.2])
+    values = [
+        float(block.memory_gate.detach())
+        for block in model.transformer["h"]
+    ]
+    assert values == pytest.approx([0.2, 0.2])
 
 
 def test_first_generated_token_matches_between_inference_modes():

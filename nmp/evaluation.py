@@ -11,7 +11,7 @@ from .checkpoint import config_from_checkpoint, load_checkpoint, restore_checkpo
 from .config import (
     ExperimentConfig,
     active_objective_metadata,
-    transition_target_for_variant,
+    condition_label,
 )
 from .countdown import (
     CountdownTokenizer,
@@ -61,11 +61,11 @@ def evaluate_batches(
     for cpu_batch in batches:
         batch = cpu_batch.to(device)
         tokens = batch.tokens
-        transition_config = config.objective.transition
         with autocast_context(device, config.training.precision):
             output = model(tokens)
             losses = compute_loss(
-                variant=config.model.variant,
+                architecture=config.model.architecture,
+                transition=config.objective.transition,
                 model=model,
                 output=output,
                 tokens=tokens,
@@ -73,13 +73,8 @@ def evaluate_batches(
                 pad_token_id=tokenizer.pad_id,
                 eos_token_id=tokenizer.eos_id,
                 predictor=predictor,
-                lambda_transition=transition_config.lambda_transition,
-                lambda_kl=getattr(transition_config, "lambda_kl", 1.0),
-                transition_horizon=getattr(transition_config, "horizon", 1),
-                transition_target=transition_target_for_variant(
-                    config.model.variant,
-                    transition_config,
-                ),
+                lambda_transition=config.objective.lambda_transition,
+                lambda_kl=config.objective.lambda_kl,
                 ntp_pass_weights=config.objective.ntp_pass_weights,
             )
         metrics = losses.detached_metrics()
@@ -143,23 +138,16 @@ def evaluate_batches(
     }
     result["perplexity"] = safe_perplexity(result["final_pass_nll"])
     if predictor is not None:
-        transition_config = config.objective.transition
         transition_prediction_loss = (
             totals["transition_prediction_loss"] / transition_count
             if transition_count
             else 0.0
         )
         result["transition_prediction_loss"] = transition_prediction_loss
-        result.update(
-            active_objective_metadata(
-                config.model.variant,
-                transition_config,
-            )
-        )
+        result.update(active_objective_metadata(config.objective))
         result["transition_count"] = transition_count
-        lambda_kl = getattr(transition_config, "lambda_kl", 1.0)
         result["loss"] += (
-            transition_config.lambda_transition * transition_prediction_loss
+            config.objective.lambda_transition * transition_prediction_loss
         )
         if transition_kl_count:
             transition_kl_loss = (
@@ -169,7 +157,7 @@ def evaluate_batches(
             )
             result["transition_kl_loss"] = transition_kl_loss
             result["transition_kl_count"] = transition_kl_count
-            result["loss"] += lambda_kl * transition_kl_loss
+            result["loss"] += config.objective.lambda_kl * transition_kl_loss
     if (
         include_accuracy
         and getattr(tokenizer, "task", None) == "countdown"
@@ -545,11 +533,10 @@ def evaluate_run(
     result = {
         "step": int(checkpoint["step"]),
         "checkpoint": checkpoint_name,
-        "variant": config.model.variant,
-        **active_objective_metadata(
-            config.model.variant,
-            config.objective.transition,
-        ),
+        "condition": condition_label(config),
+        "architecture": config.model.architecture,
+        "transition": config.objective.transition,
+        **active_objective_metadata(config.objective),
         "parameters": count_parameters(model, predictor),
         "protocol": {
             "config_source": "checkpoint",
