@@ -27,6 +27,16 @@ the model has extra compute steps before producing the solution.
    NextLat-style self-distillation KL loss from actual hidden-state teacher
    logits to predicted-hidden-state student logits.
 
+## Protocol Matrix
+
+| Condition | Architecture | Transition target | NTP mask | SmoothL1 mask | KL mask |
+| --- | --- | --- | --- | --- | --- |
+| `transformer_ntp` | Transformer | none | solution + EOS | n/a | n/a |
+| `memory_tape_ntp` | MemoryTape | none | solution + EOS | n/a | n/a |
+| `memory_tape_nmp` | MemoryTape | final memory | solution + EOS | non-EOS/non-PAD transitions | n/a |
+| `memory_tape_hidden_transition` | MemoryTape | final hidden | solution + EOS | non-EOS/non-PAD transitions | n/a |
+| `memory_tape_hidden_transition_kl` | MemoryTape | final hidden | solution + EOS | non-EOS/non-PAD transitions | target-masked positions |
+
 The transition objective remains the same teacher-forced one-step residual
 predictor:
 
@@ -50,7 +60,7 @@ Training reads explicit Countdown files. Use the generator CLI to create
 paper-scale files:
 
 ```bash
-python -m nmp.cli.generate_countdown \
+python -m nmp.cli.generate_countdown_data \
   --output-dir data/countdown \
   --seed 444 \
   --input-numbers 4 \

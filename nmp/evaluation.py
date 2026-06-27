@@ -222,6 +222,7 @@ def countdown_accuracy_for_batches(
             generated = model.generate(
                 prompt,
                 max_new_tokens,
+                temperature=0.0,
                 do_sample=False,
                 inference_mode="recompute",
                 eos_token_id=tokenizer.eos_id,
@@ -358,6 +359,7 @@ def generation_diagnostics(
         generated = model.generate(
             prompt.clone(),
             max_new_tokens,
+            temperature=0.0,
             do_sample=False,
             inference_mode="recompute",
             eos_token_id=tokenizer.eos_id,

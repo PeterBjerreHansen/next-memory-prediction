@@ -53,9 +53,7 @@ def main(argv=None):
         max_target=args.max_target,
         seed=args.seed,
     )
-    suffix = (
-        f"b{args.input_numbers}_t{args.max_target}_n{args.train_samples}.txt"
-    )
+    suffix = f"b{args.input_numbers}_t{args.max_target}_n{args.train_samples}.txt"
     _write_rows(
         args.output_dir / f"train1_{suffix}",
         rng=random.Random(args.seed),

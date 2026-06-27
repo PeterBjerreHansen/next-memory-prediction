@@ -203,12 +203,13 @@ class CausalTransformer(nn.Module):
     ) -> torch.Tensor:
         if inference_mode != "recompute":
             raise ValueError("CausalTransformer only supports recompute inference")
-        if temperature <= 0:
-            raise ValueError("temperature must be positive")
+        if do_sample and temperature <= 0:
+            raise ValueError("temperature must be positive when sampling")
         for _ in range(max_new_tokens):
             ids_cond = ids[:, -self.config.block_size :]
-            logits = self(ids_cond).logits[:, -1, :] / temperature
+            logits = self(ids_cond).logits[:, -1, :]
             if do_sample:
+                logits = logits / temperature
                 next_ids = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
             else:
                 next_ids = logits.argmax(dim=-1, keepdim=True)
@@ -383,17 +384,17 @@ class MemoryTapeTransformer(nn.Module):
         inference_mode: str = "recompute",
         eos_token_id: int | None = None,
     ) -> torch.Tensor:
-        if temperature <= 0:
-            raise ValueError("temperature must be positive")
+        if do_sample and temperature <= 0:
+            raise ValueError("temperature must be positive when sampling")
         if inference_mode == "recompute":
             for _ in range(max_new_tokens):
                 ids_cond = ids[:, -self.config.block_size :]
-                logits = self(ids_cond).logits[:, -1, :] / temperature
-                next_ids = (
-                    torch.multinomial(F.softmax(logits, dim=-1), 1)
-                    if do_sample
-                    else logits.argmax(dim=-1, keepdim=True)
-                )
+                logits = self(ids_cond).logits[:, -1, :]
+                if do_sample:
+                    logits = logits / temperature
+                    next_ids = torch.multinomial(F.softmax(logits, dim=-1), 1)
+                else:
+                    next_ids = logits.argmax(dim=-1, keepdim=True)
                 ids = torch.cat((ids, next_ids), dim=1)
                 if eos_token_id is not None and bool((next_ids == eos_token_id).all()):
                     break
@@ -417,6 +418,8 @@ class MemoryTapeTransformer(nn.Module):
         do_sample: bool,
         eos_token_id: int | None,
     ) -> torch.Tensor:
+        if do_sample and temperature <= 0:
+            raise ValueError("temperature must be positive when sampling")
         if max_new_tokens <= 0:
             return ids
 
@@ -426,12 +429,12 @@ class MemoryTapeTransformer(nn.Module):
         memory_history = output.memory_states
 
         for generated_index in range(max_new_tokens):
-            next_logits = logits[:, -1, :] / temperature
-            next_ids = (
-                torch.multinomial(F.softmax(next_logits, dim=-1), 1)
-                if do_sample
-                else next_logits.argmax(dim=-1, keepdim=True)
-            )
+            next_logits = logits[:, -1, :]
+            if do_sample:
+                next_logits = next_logits / temperature
+                next_ids = torch.multinomial(F.softmax(next_logits, dim=-1), 1)
+            else:
+                next_ids = next_logits.argmax(dim=-1, keepdim=True)
             ids = torch.cat((ids, next_ids), dim=1)
             if eos_token_id is not None and bool((next_ids == eos_token_id).all()):
                 break

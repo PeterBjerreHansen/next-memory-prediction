@@ -19,7 +19,7 @@ nmp-evaluate = "nmp.cli.evaluate:main"
 nmp-plot = "nmp.cli.plot:main"
 nmp-run-experiment = "nmp.cli.run_experiment:main"
 nmp-summarize = "nmp.cli.summarize:main"
-nmp-generate-countdown = "nmp.cli.generate_countdown:main"
+nmp-generate-countdown-data = "nmp.cli.generate_countdown_data:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

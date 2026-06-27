@@ -191,7 +191,72 @@ def test_generate_rejects_nonpositive_temperature(model_kind):
             torch.tensor([[1, 2]]),
             1,
             temperature=0.0,
+            do_sample=True,
+        )
+
+
+@pytest.mark.parametrize("model_kind", ["transformer", "memory"])
+def test_greedy_generate_ignores_nonpositive_temperature(model_kind):
+    if model_kind == "transformer":
+        model = CausalTransformer(
+            TransformerConfig(
+                block_size=4,
+                vocab_size=11,
+                n_layer=1,
+                n_head=1,
+                n_embd=4,
+            )
+        )
+        generated = model.generate(
+            torch.tensor([[1, 2]]),
+            1,
+            temperature=0.0,
             do_sample=False,
+        )
+    else:
+        model = MemoryTapeTransformer(
+            MemoryTapeConfig(
+                block_size=4,
+                vocab_size=11,
+                n_layer=1,
+                n_head=1,
+                n_embd=4,
+                n_pass=2,
+            )
+        )
+        for inference_mode in ("recompute", "final_pass"):
+            generated = model.generate(
+                torch.tensor([[1, 2]]),
+                1,
+                temperature=0.0,
+                do_sample=False,
+                inference_mode=inference_mode,
+            )
+            assert generated.shape == (1, 3)
+        return
+
+    assert generated.shape == (1, 3)
+
+
+def test_final_pass_generate_rejects_nonpositive_sampling_temperature():
+    model = MemoryTapeTransformer(
+        MemoryTapeConfig(
+            block_size=4,
+            vocab_size=11,
+            n_layer=1,
+            n_head=1,
+            n_embd=4,
+            n_pass=2,
+        )
+    )
+
+    with pytest.raises(ValueError, match="temperature"):
+        model.generate(
+            torch.tensor([[1, 2]]),
+            1,
+            temperature=0.0,
+            do_sample=True,
+            inference_mode="final_pass",
         )
 
 
