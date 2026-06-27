@@ -14,7 +14,6 @@ import matplotlib.pyplot as plt
 from .artifacts import artifacts_for, read_jsonl, write_json
 from .config import (
     TRANSITION_VARIANTS,
-    canonicalize_variant,
     load_config,
     transition_target_for_variant,
 )
@@ -29,12 +28,8 @@ def load_selected_lambdas(path: str | Path) -> dict[str, float]:
     with Path(path).open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
     values = payload.get("selected_lambdas", payload)
-    canonical_values = {
-        canonicalize_variant(variant): float(value)
-        for variant, value in values.items()
-    }
     return {
-        variant: float(canonical_values[variant])
+        variant: float(values[variant])
         for variant in TRANSITION_VARIANTS
     }
 

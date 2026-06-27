@@ -16,7 +16,7 @@ data:
   countdown_input_numbers: 4
   countdown_num_equations: 3
   num_pause_tokens: 8
-  train_samples: 5000
+  train_samples: 100000
   val_samples: 512
   generalization_samples: 512
   split_seed: 444
@@ -32,16 +32,18 @@ training:
   train_steps: 10000
   micro_batch_size: 16
   gradient_accumulation_steps: 4
-  eval_interval: 500
+  eval_interval: 1000
   eval_batches: 20
   log_interval: 20
-  checkpoint_interval: 500
+  checkpoint_interval: 1000
   device: auto
   precision: float32
   compile: false
 evaluation:
   generation_prompts: 8
   accuracy_batches: null
+  training_accuracy_interval: 1000
+  training_accuracy_batches: 4
   diagnostic_batches: 8
   probe_steps: 1000
   probe_batch_size: 64

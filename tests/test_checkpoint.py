@@ -20,31 +20,31 @@ def test_eval_style_restore_does_not_require_rng_state():
     )
 
 
-def test_checkpoint_config_drops_unknown_nested_fields():
+def test_checkpoint_config_uses_current_schema_exactly():
     checkpoint = {
         "config": {
-            "name": "old",
+            "name": "current",
             "seed": 0,
             "model": {
-                "variant": "transformer_ntp",
+                "variant": "memory_tape_nmp",
                 "block_size": 8,
                 "n_layer": 1,
                 "n_head": 1,
                 "n_embd": 8,
-                "n_pass": 3,
-                "retired_model_field": "scalar",
+                "memory": {"n_pass": 3},
             },
             "objective": {
-                "transition_horizon": 1,
-                "lambda_transition": 0.3,
-                "lambda_ce": 0.2,
-                "dynamics_projection_factor": 1.7,
-                "retired_objective_field": 1,
+                "transition": {
+                    "horizon": 1,
+                    "lambda_transition": 0.3,
+                    "lambda_ce": 0.2,
+                    "target": "memory",
+                    "projection_factor": 1.7,
+                },
             },
             "training": {
                 "train_steps": 1,
                 "micro_batch_size": 1,
-                "retired_training_field": True,
             },
         }
     }
@@ -56,12 +56,3 @@ def test_checkpoint_config_drops_unknown_nested_fields():
     assert config.objective.transition.horizon == 1
     assert config.objective.transition.projection_factor == 1.7
     assert config.model.memory.n_pass == 3
-    resolved = config.to_dict()
-    assert "n_pass" not in resolved["model"]
-    assert "retired_model_field" not in resolved["model"]
-    assert "lambda_transition" not in resolved["objective"]
-    assert "lambda_ce" not in resolved["objective"]
-    assert "transition_horizon" not in resolved["objective"]
-    assert "dynamics_projection_factor" not in resolved["objective"]
-    assert "retired_objective_field" not in resolved["objective"]
-    assert "retired_training_field" not in resolved["training"]

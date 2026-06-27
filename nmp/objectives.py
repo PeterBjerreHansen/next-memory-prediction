@@ -7,7 +7,6 @@ from torch.nn import functional as F
 
 from .config import (
     TRANSITION_VARIANTS,
-    canonicalize_variant,
     transition_target_for_variant,
 )
 from .models import (
@@ -272,7 +271,6 @@ def compute_loss(
     transition_target: str | None = None,
     ntp_pass_weights: list[float] | tuple[float, ...] | None = None,
 ) -> LossBreakdown:
-    variant = canonicalize_variant(variant)
     if transition_horizon != 1:
         raise ValueError("transition_horizon must be 1 in this implementation")
     if variant == "transformer_ntp":

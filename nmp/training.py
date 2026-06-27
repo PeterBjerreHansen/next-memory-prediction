@@ -14,7 +14,7 @@ from .data import (
     make_tokenizer,
     sequential_batches,
 )
-from .evaluation import evaluate_batches
+from .evaluation import countdown_accuracy_for_batches, evaluate_batches
 from .factory import build_model, count_parameters, trainable_parameters
 from .objectives import compute_loss
 from .runtime import (
@@ -129,6 +129,16 @@ def train_experiment(
         num_pause_tokens=config.data.num_pause_tokens,
         num_batches=config.training.eval_batches,
     )
+    accuracy_diagnostic_batches = None
+    if config.evaluation.training_accuracy_interval is not None:
+        accuracy_diagnostic_batches = sequential_batches(
+            val_corpus,
+            tokenizer,
+            batch_size=config.training.micro_batch_size,
+            block_size=config.model.block_size,
+            num_pause_tokens=config.data.num_pause_tokens,
+            num_batches=config.evaluation.training_accuracy_batches,
+        )
     train_window_start = time.perf_counter()
     run_start = train_window_start
     train_window_tokens = 0
@@ -328,6 +338,37 @@ def train_experiment(
                 best_selection_metric=best_selection_metric,
                 selection_metric=config.evaluation.checkpoint_metric,
                 selection_mode=config.evaluation.checkpoint_mode,
+            )
+
+        accuracy_interval = config.evaluation.training_accuracy_interval
+        should_accuracy_diagnostic = (
+            accuracy_interval is not None
+            and accuracy_diagnostic_batches is not None
+            and (step % accuracy_interval == 0 or step == config.training.train_steps)
+            and not (
+                should_eval
+                and _checkpoint_metric_requires_accuracy(
+                    config.evaluation.checkpoint_metric
+                )
+            )
+        )
+        if should_accuracy_diagnostic:
+            accuracy_metrics = countdown_accuracy_for_batches(
+                config=config,
+                model=model,
+                batches=accuracy_diagnostic_batches,
+                tokenizer=tokenizer,
+                device=device,
+                prefix="val",
+            )
+            append_jsonl(
+                artifacts.metrics_path,
+                {
+                    "event": "accuracy_diagnostic",
+                    "step": step,
+                    "accuracy_batches": config.evaluation.training_accuracy_batches,
+                    **accuracy_metrics,
+                },
             )
 
     append_jsonl(

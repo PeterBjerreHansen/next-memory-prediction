@@ -14,22 +14,12 @@ VARIANTS = (
     "memory_tape_hidden_transition",
     "memory_tape_hidden_transition_kl",
 )
-LEGACY_VARIANT_ALIASES = {
-    "memory_tape_nextlat_no_kl": "memory_tape_hidden_transition",
-}
-ACCEPTED_VARIANTS = (*VARIANTS, *LEGACY_VARIANT_ALIASES)
 TRANSITION_VARIANTS = (
     "memory_tape_nmp",
     "memory_tape_hidden_transition",
     "memory_tape_hidden_transition_kl",
 )
 PRECISIONS = ("float32", "bfloat16", "float16")
-
-
-def canonicalize_variant(variant: str) -> str:
-    if variant in LEGACY_VARIANT_ALIASES:
-        return LEGACY_VARIANT_ALIASES[variant]
-    return variant
 
 
 @dataclass(kw_only=True)
@@ -51,11 +41,10 @@ class ModelConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     def validate(self) -> None:
-        self.variant = canonicalize_variant(self.variant)
         if isinstance(self.memory, dict):
             self.memory = MemoryConfig(**self.memory)
         if self.variant not in VARIANTS:
-            accepted = ", ".join(ACCEPTED_VARIANTS)
+            accepted = ", ".join(VARIANTS)
             raise ValueError(f"variant must be one of: {accepted}")
         if self.block_size < 2:
             raise ValueError("block_size must be at least 2")
@@ -206,6 +195,8 @@ class EvaluationConfig:
     generation_prompts: int = 4
     diagnostic_batches: int = 8
     accuracy_batches: int | None = None
+    training_accuracy_interval: int | None = None
+    training_accuracy_batches: int = 4
     probe_steps: int = 1000
     probe_batch_size: int = 64
     probe_offsets: list[int] = field(default_factory=lambda: list(range(1, 21)))
@@ -224,6 +215,13 @@ class EvaluationConfig:
             raise ValueError("probe_offsets must contain positive integers")
         if self.accuracy_batches is not None and self.accuracy_batches < 1:
             raise ValueError("accuracy_batches must be positive or null")
+        if (
+            self.training_accuracy_interval is not None
+            and self.training_accuracy_interval < 1
+        ):
+            raise ValueError("training_accuracy_interval must be positive or null")
+        if self.training_accuracy_batches < 1:
+            raise ValueError("training_accuracy_batches must be positive")
         if not self.checkpoint_metric:
             raise ValueError("checkpoint_metric must be non-empty")
         if self.checkpoint_mode not in {"min", "max"}:
@@ -272,16 +270,12 @@ class ExperimentConfig:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ExperimentConfig":
-        model_payload = normalize_model_payload(payload["model"])
-        objective_payload = normalize_objective_payload(
-            payload.get("objective", {})
-        )
         config = cls(
             name=str(payload["name"]),
             seed=int(payload.get("seed", 0)),
-            model=ModelConfig(**model_payload),
+            model=ModelConfig(**payload["model"]),
             data=DataConfig(**payload.get("data", {})),
-            objective=ObjectiveConfig(**objective_payload),
+            objective=ObjectiveConfig(**payload.get("objective", {})),
             training=TrainingConfig(**payload["training"]),
             evaluation=EvaluationConfig(**payload.get("evaluation", {})),
         )
@@ -289,55 +283,7 @@ class ExperimentConfig:
         return config
 
 
-def normalize_model_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(payload)
-    memory_payload = dict(normalized.get("memory", {}))
-    legacy_n_pass = normalized.pop("n_pass", None)
-    if legacy_n_pass is not None and "n_pass" not in memory_payload:
-        memory_payload["n_pass"] = legacy_n_pass
-    normalized["memory"] = memory_payload
-    return normalized
-
-
-def normalize_objective_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(payload)
-    transition_payload = dict(normalized.get("transition", {}))
-    nested_legacy_horizon = transition_payload.pop("transition_horizon", None)
-    if nested_legacy_horizon is not None and "horizon" not in transition_payload:
-        transition_payload["horizon"] = nested_legacy_horizon
-    legacy_horizon = normalized.pop("transition_horizon", None)
-    if legacy_horizon is not None and "horizon" not in transition_payload:
-        transition_payload["horizon"] = legacy_horizon
-    legacy_lambda_transition = normalized.pop("lambda_transition", None)
-    if (
-        legacy_lambda_transition is not None
-        and "lambda_transition" not in transition_payload
-    ):
-        transition_payload["lambda_transition"] = legacy_lambda_transition
-    legacy_projection_factor = normalized.pop(
-        "dynamics_projection_factor",
-        None,
-    )
-    if (
-        legacy_projection_factor is not None
-        and "projection_factor" not in transition_payload
-    ):
-        transition_payload["projection_factor"] = legacy_projection_factor
-    legacy_lambda_kl = normalized.pop("lambda_kl", None)
-    if legacy_lambda_kl is not None and "lambda_kl" not in transition_payload:
-        transition_payload["lambda_kl"] = legacy_lambda_kl
-    legacy_lambda_ce = normalized.pop("lambda_ce", None)
-    if legacy_lambda_ce is not None and "lambda_ce" not in transition_payload:
-        transition_payload["lambda_ce"] = legacy_lambda_ce
-    legacy_target = normalized.pop("transition_target", None)
-    if legacy_target is not None and "target" not in transition_payload:
-        transition_payload["target"] = legacy_target
-    normalized["transition"] = transition_payload
-    return normalized
-
-
 def default_transition_target_for_variant(variant: str) -> str | None:
-    variant = canonicalize_variant(variant)
     if variant == "memory_tape_nmp":
         return "memory"
     if variant in {

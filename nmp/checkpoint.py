@@ -1,25 +1,12 @@
 from __future__ import annotations
 
-import copy
-from dataclasses import fields
 import random
 from pathlib import Path
 from typing import Any
 
 import torch
 
-from .config import (
-    DataConfig,
-    EvaluationConfig,
-    ExperimentConfig,
-    MemoryConfig,
-    ModelConfig,
-    ObjectiveConfig,
-    TransitionObjectiveConfig,
-    TrainingConfig,
-    normalize_model_payload,
-    normalize_objective_payload,
-)
+from .config import ExperimentConfig
 
 
 def _torch_load(path: str | Path, *, map_location="cpu") -> dict[str, Any]:
@@ -80,58 +67,8 @@ def load_checkpoint(path: str | Path, *, map_location="cpu") -> dict[str, Any]:
     return _torch_load(path, map_location=map_location)
 
 
-def _known_fields(config_type) -> set[str]:
-    return {field.name for field in fields(config_type)}
-
-
-def _drop_unknown_fields(payload: Any, config_type) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        return {}
-    known = _known_fields(config_type)
-    return {
-        key: value
-        for key, value in payload.items()
-        if key in known
-    }
-
-
-def migrate_checkpoint_config(payload: dict[str, Any]) -> dict[str, Any]:
-    config = copy.deepcopy(payload)
-    model_payload = normalize_model_payload(config.get("model", {}))
-    model_payload = _drop_unknown_fields(model_payload, ModelConfig)
-    model_payload["memory"] = _drop_unknown_fields(
-        model_payload.get("memory", {}),
-        MemoryConfig,
-    )
-    config["model"] = model_payload
-    config["data"] = _drop_unknown_fields(config.get("data", {}), DataConfig)
-    objective_payload = normalize_objective_payload(
-        config.get("objective", {})
-    )
-    objective_payload = _drop_unknown_fields(
-        objective_payload,
-        ObjectiveConfig,
-    )
-    objective_payload["transition"] = _drop_unknown_fields(
-        objective_payload.get("transition", {}),
-        TransitionObjectiveConfig,
-    )
-    config["objective"] = objective_payload
-    config["training"] = _drop_unknown_fields(
-        config.get("training", {}),
-        TrainingConfig,
-    )
-    config["evaluation"] = _drop_unknown_fields(
-        config.get("evaluation", {}),
-        EvaluationConfig,
-    )
-    return config
-
-
 def config_from_checkpoint(checkpoint: dict[str, Any]) -> ExperimentConfig:
-    return ExperimentConfig.from_dict(
-        migrate_checkpoint_config(checkpoint["config"])
-    )
+    return ExperimentConfig.from_dict(checkpoint["config"])
 
 
 def restore_checkpoint(

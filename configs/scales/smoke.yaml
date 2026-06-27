@@ -42,6 +42,8 @@ training:
 evaluation:
   generation_prompts: 2
   accuracy_batches: null
+  training_accuracy_interval: 5
+  training_accuracy_batches: 1
   diagnostic_batches: 2
   probe_steps: 10
   probe_batch_size: 2

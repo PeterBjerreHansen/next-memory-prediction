@@ -82,7 +82,11 @@ bash scripts/run_development_matrix.sh runs
 Run a dry smoke expansion:
 
 ```bash
-bash scripts/run_development_matrix.sh runs --seeds 0 --dry-run
+python -m nmp.cli.run_experiment \
+  --experiment configs/experiments/round1_smoke.yaml \
+  --runs-root runs \
+  --seeds 0 \
+  --dry-run
 ```
 
 The manifests select checkpoints and transition weights by `final_pass_nll` with
@@ -91,6 +95,12 @@ solution accuracy is sparse early in training.
 Reports still include final-pass NLL, perplexity, transition loss, KL/CE
 auxiliary loss diagnostics, throughput, representation diagnostics, generated
 samples, and linear probes.
+
+The development scale uses 100k generated training examples. During training,
+NLL validation/checkpointing is intentionally less frequent than the original
+small-data pilot, while `evaluation.training_accuracy_interval` enables a
+lightweight periodic greedy-generation accuracy diagnostic over a small fixed
+validation slice.
 
 ## Evaluation
 

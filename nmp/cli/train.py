@@ -6,9 +6,8 @@ from pathlib import Path
 
 from nmp.checkpoint import config_from_checkpoint, load_checkpoint
 from nmp.config import (
-    ACCEPTED_VARIANTS,
     ExperimentConfig,
-    canonicalize_variant,
+    VARIANTS,
     load_config,
 )
 from nmp.evaluation import evaluate_run
@@ -38,7 +37,7 @@ def parse_args(argv=None):
     parser.add_argument("--seed", type=int)
     parser.add_argument(
         "--variant",
-        choices=ACCEPTED_VARIANTS,
+        choices=VARIANTS,
     )
     parser.add_argument("--lambda-transition", type=float)
     parser.add_argument("--lambda-kl", type=float)
@@ -105,7 +104,7 @@ def resolve_config(args) -> tuple[ExperimentConfig, Path]:
     if args.seed is not None:
         config.seed = args.seed
     if args.variant is not None:
-        config.model.variant = canonicalize_variant(args.variant)
+        config.model.variant = args.variant
         config.objective.transition.target = None
         config.name = f"{config.name}-{config.model.variant}"
     if args.lambda_transition is not None:

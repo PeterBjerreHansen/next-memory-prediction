@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .config import ExperimentConfig, TRANSITION_VARIANTS, canonicalize_variant
+from .config import ExperimentConfig, TRANSITION_VARIANTS
 from .models import (
     CausalTransformer,
     LatentTransitionPredictor,
@@ -19,7 +19,6 @@ def build_model(
     LatentTransitionPredictor | None,
 ]:
     model_config = config.model
-    model_config.variant = canonicalize_variant(model_config.variant)
     if model_config.variant == "transformer_ntp":
         model = CausalTransformer(
             TransformerConfig(

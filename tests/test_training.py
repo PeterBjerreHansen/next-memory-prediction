@@ -70,3 +70,31 @@ def test_checkpoint_resume_is_exact(
         3,
         4,
     ]
+
+
+def test_training_logs_generated_accuracy_diagnostic(
+    local_countdown_files,
+    tmp_path: Path,
+):
+    train_file, val_file = local_countdown_files
+    config = make_config(
+        "transformer_ntp",
+        train_file,
+        val_file,
+        train_steps=1,
+    )
+    config.evaluation.training_accuracy_interval = 1
+    config.evaluation.training_accuracy_batches = 1
+    run_dir = tmp_path / "accuracy-diagnostic"
+
+    train_experiment(config, run_dir=run_dir)
+
+    rows = read_jsonl(artifacts_for(run_dir).metrics_path)
+    diagnostics = [
+        row for row in rows if row["event"] == "accuracy_diagnostic"
+    ]
+    assert len(diagnostics) == 1
+    assert diagnostics[0]["step"] == 1
+    assert diagnostics[0]["accuracy_batches"] == 1
+    assert diagnostics[0]["val_sequences"] == config.training.micro_batch_size
+    assert "val_accuracy" in diagnostics[0]

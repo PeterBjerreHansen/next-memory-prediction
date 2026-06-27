@@ -19,7 +19,13 @@ def plot_training(run_dir: str | Path) -> Path | None:
     rows = read_jsonl(artifacts.metrics_path)
     train = [row for row in rows if row.get("event") == "train"]
     validation = [row for row in rows if row.get("event") == "validation"]
-    if not train and not validation:
+    accuracy_diagnostics = [
+        row
+        for row in rows
+        if row.get("event") in {"validation", "accuracy_diagnostic"}
+        and row.get("val_accuracy") is not None
+    ]
+    if not train and not validation and not accuracy_diagnostics:
         return None
     figure, axes = plt.subplots(1, 2, figsize=(11, 4))
     if train:
@@ -58,32 +64,31 @@ def plot_training(run_dir: str | Path) -> Path | None:
             marker="o",
             label="validation final-pass NLL",
         )
-        accuracy_rows = [row for row in validation if row.get("val_accuracy") is not None]
-        if accuracy_rows:
-            axes[1].plot(
-                [row["step"] for row in accuracy_rows],
-                [row["val_accuracy"] for row in accuracy_rows],
-                marker="o",
-                label="strict validation accuracy",
-            )
-            compat_rows = [
-                row
-                for row in validation
-                if row.get("val_nextlat_compat_accuracy") is not None
-            ]
-            if compat_rows:
-                axes[1].plot(
-                    [row["step"] for row in compat_rows],
-                    [row["val_nextlat_compat_accuracy"] for row in compat_rows],
-                    marker="o",
-                    label="NextLat-compatible accuracy",
-                )
-        else:
+        if not accuracy_diagnostics:
             axes[1].plot(
                 [row["step"] for row in validation],
                 [row["perplexity"] for row in validation],
                 marker="o",
                 label="validation perplexity",
+            )
+    if accuracy_diagnostics:
+        axes[1].plot(
+            [row["step"] for row in accuracy_diagnostics],
+            [row["val_accuracy"] for row in accuracy_diagnostics],
+            marker="o",
+            label="strict validation accuracy",
+        )
+        compat_rows = [
+            row
+            for row in accuracy_diagnostics
+            if row.get("val_nextlat_compat_accuracy") is not None
+        ]
+        if compat_rows:
+            axes[1].plot(
+                [row["step"] for row in compat_rows],
+                [row["val_nextlat_compat_accuracy"] for row in compat_rows],
+                marker="o",
+                label="NextLat-compatible accuracy",
             )
     axes[0].set_title("Token objective")
     axes[1].set_title("Countdown / auxiliary")

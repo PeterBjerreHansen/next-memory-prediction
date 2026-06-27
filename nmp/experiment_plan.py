@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from .config import ExperimentConfig, canonicalize_variant
+from .config import ExperimentConfig
 
 
 FROM_SELECTION = "from_selection"
@@ -58,7 +58,7 @@ class ConditionSpec:
     def from_dict(cls, payload: dict[str, Any]) -> "ConditionSpec":
         condition = cls(
             name=str(payload.get("name", payload["variant"])),
-            variant=canonicalize_variant(str(payload["variant"])),
+            variant=str(payload["variant"]),
             lambda_transition=payload.get("lambda_transition"),
             overrides=dict(payload.get("overrides", {})),
         )
@@ -98,7 +98,7 @@ class ExperimentPlan:
         *,
         source_path: str | Path | None = None,
     ) -> "ExperimentPlan":
-        base_config = payload.get("base_config", payload.get("scale_config"))
+        base_config = payload.get("base_config")
         if base_config is None:
             raise ValueError("experiment manifest requires base_config")
         plan = cls(
@@ -164,7 +164,7 @@ class ExpandedRunSpec:
             experiment=str(payload["experiment"]),
             condition=str(payload["condition"]),
             run_id=str(payload["run_id"]),
-            variant=canonicalize_variant(str(payload["variant"])),
+            variant=str(payload["variant"]),
             seed=int(payload["seed"]),
             lambda_transition=(
                 None
