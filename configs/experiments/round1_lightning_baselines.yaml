@@ -1,0 +1,29 @@
+name: round1_lightning_baselines
+base_config: configs/scales/reference.yaml
+runs_root: runs_lightning
+
+selection:
+  metric: final_pass_nll
+  mode: min
+  select_lambda_per_variant: false
+
+seeds: [0]
+
+conditions:
+  - name: transformer_ntp
+    architecture: transformer
+    transition: none
+    lambda_transition: null
+
+  - name: memory_tape_ntp
+    architecture: memory_tape
+    transition: none
+    lambda_transition: null
+    overrides:
+      objective:
+        ntp_pass_weights: [0.0, 0.0, 0.5, 0.5]
+
+post_run:
+  evaluate: true
+  plot: true
+  summarize: true

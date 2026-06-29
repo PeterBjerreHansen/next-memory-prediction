@@ -95,6 +95,19 @@ The development script creates the 100k-example Countdown files under
 If existing checkpoints cannot be resumed under the current config schema, the
 runner archives those run directories and starts them fresh.
 
+Reference runs normally use transition weights selected by the development
+summary. For short `--steps` timing benchmarks, the reference script falls back
+to fixed benchmark weights if that summary does not exist yet.
+
+Run the Lightning/reference baselines only:
+
+```bash
+bash scripts/run_lightning_baselines.sh
+```
+
+This runs only `transformer_ntp` and `memory_tape_ntp`, defaults to CUDA, and
+creates the 500k-example reference Countdown files on first real run.
+
 Run a dry smoke expansion:
 
 ```bash
