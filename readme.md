@@ -90,6 +90,11 @@ Run the development matrix:
 bash scripts/run_development_matrix.sh runs
 ```
 
+The development script creates the 100k-example Countdown files under
+`data/countdown` on first real run. Passing `--dry-run` skips data generation.
+If existing checkpoints cannot be resumed under the current config schema, the
+runner archives those run directories and starts them fresh.
+
 Run a dry smoke expansion:
 
 ```bash

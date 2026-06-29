@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import shlex
 import shutil
 import subprocess
@@ -62,9 +63,16 @@ def _load_selected_lambdas(plan, args) -> dict[str, float] | None:
     return load_selected_lambdas(selection_path)
 
 
-def train_command(run, plan, *, device: str | None, steps: int | None) -> list[str]:
+def train_command(
+    run,
+    plan,
+    *,
+    device: str | None,
+    steps: int | None,
+    force_fresh: bool = False,
+) -> list[str]:
     latest = run.spec.run_dir / "latest.pt"
-    if latest.exists():
+    if latest.exists() and not force_fresh:
         command = [
             sys.executable,
             "-m",
@@ -99,19 +107,54 @@ def run(command: list[str], *, dry_run: bool) -> None:
         subprocess.run(command, check=True)
 
 
-def assert_resume_compatible(run) -> None:
+def _archive_run_dir(run_dir: Path) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive = run_dir.with_name(f"{run_dir.name}.incompatible-{timestamp}")
+    counter = 1
+    while archive.exists():
+        archive = run_dir.with_name(
+            f"{run_dir.name}.incompatible-{timestamp}-{counter}"
+        )
+        counter += 1
+    shutil.move(str(run_dir), str(archive))
+    return archive
+
+
+def assert_resume_compatible(
+    run,
+    *,
+    dry_run: bool,
+) -> bool:
     latest = run.spec.run_dir / "latest.pt"
     if not latest.exists():
-        return
-    checkpoint_config = config_from_checkpoint(load_checkpoint(latest))
-    checkpoint_config.training.train_steps = run.config.training.train_steps
-    checkpoint_config.training.device = run.config.training.device
-    checkpoint_config.validate()
-    if checkpoint_config.to_dict() != run.config.to_dict():
-        raise ValueError(
-            "existing checkpoint config does not match manifest for "
-            f"{run.spec.run_dir}"
-        )
+        return False
+    try:
+        checkpoint_config = config_from_checkpoint(load_checkpoint(latest))
+        checkpoint_config.training.train_steps = run.config.training.train_steps
+        checkpoint_config.training.device = run.config.training.device
+        checkpoint_config.validate()
+        if checkpoint_config.to_dict() != run.config.to_dict():
+            raise ValueError(
+                "checkpoint config does not match expanded manifest config"
+            )
+    except Exception as error:
+        if dry_run:
+            print(
+                "Would archive incompatible run "
+                f"{run.spec.run_dir}; reason: {error}",
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            archive = _archive_run_dir(run.spec.run_dir)
+            print(
+                "Archived incompatible run "
+                f"{run.spec.run_dir} -> {archive}; reason: {error}",
+                file=sys.stderr,
+                flush=True,
+            )
+        return True
+    return False
 
 
 def write_manifest_artifacts(
@@ -119,16 +162,23 @@ def write_manifest_artifacts(
     manifest_path: Path,
     experiment_root: Path,
     expanded_runs,
-) -> Path:
+    dry_run: bool,
+) -> tuple[Path, set[Path]]:
     experiment_root.mkdir(parents=True, exist_ok=True)
     copied_manifest = experiment_root / "experiment.yaml"
     shutil.copyfile(manifest_path, copied_manifest)
     expanded_path = experiment_root / "expanded_runs.jsonl"
     write_expanded_runs(expanded_path, expanded_runs)
+    force_fresh_run_dirs: set[Path] = set()
     for expanded in expanded_runs:
-        assert_resume_compatible(expanded)
+        force_fresh = assert_resume_compatible(
+            expanded,
+            dry_run=dry_run,
+        )
+        if force_fresh:
+            force_fresh_run_dirs.add(expanded.spec.run_dir)
         save_config(expanded.spec.resolved_config_path, expanded.config)
-    return expanded_path
+    return expanded_path, force_fresh_run_dirs
 
 
 def main(argv=None):
@@ -144,11 +194,16 @@ def main(argv=None):
         device=args.device,
     )
     root = experiment_dir(plan, args.runs_root)
-    expanded_path = write_manifest_artifacts(
-        manifest_path=args.experiment,
-        experiment_root=root,
-        expanded_runs=expanded,
-    )
+    try:
+        expanded_path, force_fresh_run_dirs = write_manifest_artifacts(
+            manifest_path=args.experiment,
+            experiment_root=root,
+            expanded_runs=expanded,
+            dry_run=args.dry_run,
+        )
+    except RuntimeError as error:
+        print(f"error: {error}", file=sys.stderr)
+        raise SystemExit(1) from None
     for run_spec in expanded:
         run(
             train_command(
@@ -156,6 +211,7 @@ def main(argv=None):
                 plan,
                 device=args.device,
                 steps=args.steps,
+                force_fresh=run_spec.spec.run_dir in force_fresh_run_dirs,
             ),
             dry_run=args.dry_run,
         )
